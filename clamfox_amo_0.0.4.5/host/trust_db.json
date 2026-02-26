@@ -1,0 +1,382 @@
+{
+  "hvts": [
+    {
+      "brand": "paypal",
+      "domains": [
+        "paypal.com",
+        "paypal.co.uk",
+        "paypal.me"
+      ]
+    },
+    {
+      "brand": "microsoft",
+      "domains": [
+        "microsoft.com",
+        "live.com",
+        "office.com",
+        "microsoftonline.com",
+        "windows.com"
+      ]
+    },
+    {
+      "brand": "google",
+      "domains": [
+        "google.com",
+        "accounts.google.com",
+        "google.co.uk",
+        "google.de",
+        "google.fr",
+        "google.it",
+        "google.es",
+        "google.ca",
+        "googles.com",
+        "gogle.com"
+      ]
+    },
+    {
+      "brand": "apple",
+      "domains": [
+        "apple.com",
+        "icloud.com"
+      ]
+    },
+    {
+      "brand": "amazon",
+      "domains": [
+        "amazon.com",
+        "amazon.co.uk",
+        "primevideo.com",
+        "amazon.de",
+        "amazon.fr",
+        "amazon.it",
+        "amazon.es",
+        "amazon.ca"
+      ]
+    },
+    {
+      "brand": "chase",
+      "domains": [
+        "chase.com"
+      ]
+    },
+    {
+      "brand": "bankofamerica",
+      "domains": [
+        "bankofamerica.com"
+      ]
+    },
+    {
+      "brand": "wellsfargo",
+      "domains": [
+        "wellsfargo.com"
+      ]
+    },
+    {
+      "brand": "binance",
+      "domains": [
+        "binance.com"
+      ]
+    },
+    {
+      "brand": "coinbase",
+      "domains": [
+        "coinbase.com"
+      ]
+    },
+    {
+      "brand": "facebook",
+      "domains": [
+        "facebook.com"
+      ]
+    },
+    {
+      "brand": "netflix",
+      "domains": [
+        "netflix.com"
+      ]
+    },
+    {
+      "brand": "navyfederal",
+      "domains": [
+        "navyfederal.org"
+      ]
+    },
+    {
+      "brand": "capitalone",
+      "domains": [
+        "capitalone.com"
+      ]
+    },
+    {
+      "brand": "citi",
+      "domains": [
+        "citi.com"
+      ]
+    },
+    {
+      "brand": "hsbc",
+      "domains": [
+        "hsbc.com",
+        "hsbc.co.uk"
+      ]
+    },
+    {
+      "brand": "barclays",
+      "domains": [
+        "barclays.co.uk"
+      ]
+    },
+    {
+      "brand": "santander",
+      "domains": [
+        "santander.com",
+        "santander.co.uk",
+        "santander.es"
+      ]
+    },
+    {
+      "brand": "intesasanpaolo",
+      "domains": [
+        "intesasanpaolo.com"
+      ]
+    },
+    {
+      "brand": "unicredit",
+      "domains": [
+        "unicredit.it",
+        "unicredit.eu"
+      ]
+    },
+    {
+      "brand": "poste",
+      "domains": [
+        "poste.it",
+        "bancoposta.it"
+      ]
+    },
+    {
+      "brand": "bper",
+      "domains": [
+        "bper.it",
+        "bperbanca.it"
+      ]
+    },
+    {
+      "brand": "fineco",
+      "domains": [
+        "finecobank.com"
+      ]
+    },
+    {
+      "brand": "mps",
+      "domains": [
+        "mps.it"
+      ]
+    },
+    {
+      "brand": "bpm",
+      "domains": [
+        "bpm.it",
+        "bancobpm.it"
+      ]
+    },
+    {
+      "brand": "credem",
+      "domains": [
+        "creditoemiliano.it",
+        "credem.it"
+      ]
+    },
+    {
+      "brand": "bnl",
+      "domains": [
+        "bnl.it"
+      ]
+    },
+    {
+      "brand": "mediolanum",
+      "domains": [
+        "bancamediolanum.it",
+        "bmedonline.it"
+      ]
+    },
+    {
+      "brand": "illimity",
+      "domains": [
+        "illimity.com"
+      ]
+    },
+    {
+      "brand": "widiba",
+      "domains": [
+        "widiba.it"
+      ]
+    },
+    {
+      "brand": "bancaetica",
+      "domains": [
+        "bancaetica.it"
+      ]
+    },
+    {
+      "brand": "chebanca",
+      "domains": [
+        "chebanca.it"
+      ]
+    },
+    {
+      "brand": "mediobanca",
+      "domains": [
+        "mediobanca.com"
+      ]
+    },
+    {
+      "brand": "lloyds",
+      "domains": [
+        "lloydsbank.com"
+      ]
+    },
+    {
+      "brand": "natwest",
+      "domains": [
+        "natwest.com"
+      ]
+    },
+    {
+      "brand": "halifax",
+      "domains": [
+        "halifax.co.uk"
+      ]
+    },
+    {
+      "brand": "rbs",
+      "domains": [
+        "rbs.co.uk"
+      ]
+    },
+    {
+      "brand": "deutsche-bank",
+      "domains": [
+        "deutsche-bank.de"
+      ]
+    },
+    {
+      "brand": "commerzbank",
+      "domains": [
+        "commerzbank.de"
+      ]
+    },
+    {
+      "brand": "sparkasse",
+      "domains": [
+        "sparkasse.de"
+      ]
+    },
+    {
+      "brand": "postbank",
+      "domains": [
+        "postbank.de"
+      ]
+    },
+    {
+      "brand": "credit-agricole",
+      "domains": [
+        "credit-agricole.fr"
+      ]
+    },
+    {
+      "brand": "bnpparibas",
+      "domains": [
+        "bnpparibas.com"
+      ]
+    },
+    {
+      "brand": "societegenerale",
+      "domains": [
+        "societegenerale.fr"
+      ]
+    },
+    {
+      "brand": "bbva",
+      "domains": [
+        "bbva.es"
+      ]
+    },
+    {
+      "brand": "caixabank",
+      "domains": [
+        "caixabank.es"
+      ]
+    },
+    {
+      "brand": "sabadell",
+      "domains": [
+        "sabadell.com"
+      ]
+    },
+    {
+      "brand": "ubs",
+      "domains": [
+        "ubs.com"
+      ]
+    },
+    {
+      "brand": "credit-suisse",
+      "domains": [
+        "credit-suisse.com"
+      ]
+    },
+    {
+      "brand": "revolut",
+      "domains": [
+        "revolut.com"
+      ]
+    },
+    {
+      "brand": "n26",
+      "domains": [
+        "n26.com"
+      ]
+    },
+    {
+      "brand": "wise",
+      "domains": [
+        "wise.com"
+      ]
+    }
+  ],
+  "global_whitelist": [
+    "google.com",
+    "facebook.com",
+    "apple.com",
+    "tiktok.com",
+    "microsoft.com",
+    "youtube.com",
+    "amazonaws.com",
+    "instagram.com",
+    "amazon.com",
+    "icloud.com",
+    "stripe.com",
+    "paypal.com",
+    "alipay.com",
+    "tradingview.com",
+    "nubank.com.br",
+    "intuit.com",
+    "americanexpress.com",
+    "binance.com",
+    "bradesco.com.br",
+    "coingecko.com",
+    "klarna.com",
+    "venmo.com",
+    "coinbase.com",
+    "twitter.com",
+    "x.com",
+    "linkedin.com",
+    "netflix.com",
+    "spotify.com",
+    "github.com",
+    "reddit.com",
+    "discord.com",
+    "zoom.us"
+  ]
+}

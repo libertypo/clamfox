@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClamFox</title>
+    <link rel="stylesheet" href="../design_tokens.css">
+    <link rel="stylesheet" href="popup.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="logo-icon">
+                    <span class="icon-sys ic-logo"></span>
+                </div>
+                <div class="logo-text" data-i18n="extensionName">ClamFox</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div id="protection-badge" class="protection-status status-warning" data-i18n="checking">Checking...
+                </div>
+                <button id="nav-settings" class="icon-btn" data-i18n-title="settings">
+                    <span class="icon-sys ic-settings"></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- DASHBOARD VIEW -->
+        <div id="view-dashboard" class="page-view active">
+            <button id="scan-page-btn" class="primary-btn" data-i18n="scanTab">Scan Current Tab</button>
+
+            <div id="missing-warning" class="warning-box">
+                <strong data-i18n="missingTitle">ClamAV Not Found!</strong><br>
+                <span data-i18n="missingHint">Please install clamav via terminal.</span>
+            </div>
+
+            <div class="engine-status">
+                <div class="status-row">
+                    <span class="status-label" data-i18n="engineLabel">Scanner Engine</span>
+                    <div class="status-indicator">
+                        <div id="engine-dot" class="dot warning"></div>
+                        <span id="engine-text" data-i18n="checking">Checking...</span>
+                    </div>
+                </div>
+                <div class="status-row" style="margin-top: 10px;">
+                    <span class="status-label" data-i18n="onAccessLabel">On-Access Shield</span>
+                    <div id="on-access-status" class="status-meta" data-i18n="monitoring">Monitoring...</div>
+                </div>
+                <div class="status-row" style="margin-top: 10px;">
+                    <span class="status-label" data-i18n="anonymityLabel">Anonymity</span>
+                    <div class="status-indicator">
+                        <span id="tunnel-status" class="status-meta" data-i18n="local">Local</span>
+                        <div id="tunnel-dot" class="dot offline"></div>
+                    </div>
+                </div>
+                <div class="status-row" style="margin-top: 10px;">
+                    <span class="status-label" data-i18n="dbLabel">Virus Database</span>
+                    <div class="status-indicator">
+                        <span id="db-status-text" class="status-meta" data-i18n="checking">Checking...</span>
+                        <button id="refresh-engine-db" class="mini-btn">
+                            <span class="icon-sys ic-refresh"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="status-row" style="margin-top: 10px;">
+                    <span class="status-label" data-i18n="urlLabel">URL Reputation</span>
+                    <span id="url-dashboard-status" class="status-meta" data-i18n="localCache">Local Cache</span>
+                </div>
+                <div class="status-row" style="margin-top: 10px;">
+                    <span class="status-label" data-i18n="yaraLabel">YARA Threat Hunting</span>
+                    <span id="yara-dashboard-status" class="status-meta" data-i18n="yaraHint">Community Rules</span>
+                </div>
+            </div>
+
+            <div class="activity-log">
+                <div class="section-title">
+                    <span data-i18n="recentActivity">Recent Activity</span>
+                    <span id="export-scans" class="export-btn" data-i18n="json">JSON</span>
+                </div>
+                <div id="log-container">
+                    <div style="text-align: center; color: var(--text-dim); padding: 20px; font-size: 0.85rem;"
+                        data-i18n="noScans">No scans
+                        recorded</div>
+                </div>
+            </div>
+
+            <div class="activity-log" style="margin-top: 15px;">
+                <div class="section-title" style="color: var(--danger);">
+                    <span data-i18n="blockedSites">Blocked Sites</span>
+                    <div style="display: flex; gap: 10px;">
+                        <span id="view-audit-logs" class="export-btn" style="color: var(--primary);"
+                            data-i18n="audit">Audit</span>
+                        <span id="export-blocks" class="export-btn" style="color: var(--danger);"
+                            data-i18n="export">Export</span>
+                    </div>
+                </div>
+                <div id="block-container">
+                    <div style="text-align: center; color: var(--text-dim); padding: 20px; font-size: 0.85rem;"
+                        data-i18n="cleanHistory">Clean history</div>
+                </div>
+            </div>
+
+            <!-- FORENSIC OVERLAY (Hidden by default) -->
+            <div id="forensic-overlay" class="forensic-modal" style="display:none;">
+                <div class="forensic-content">
+                    <div class="forensic-header">
+                        <span id="forensic-title">Forensic Snapshot</span>
+                        <button id="close-forensic" class="mini-btn">✕</button>
+                    </div>
+                    <pre id="forensic-body"></pre>
+                    <div id="forensic-actions" style="margin-top:15px; display:flex; gap:10px;">
+                        <button id="report-threat-btn" class="mini-btn"
+                            style="color:var(--danger); border:1px solid var(--danger); padding:4px 8px;">🔥 Community
+                            Burn</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SETTINGS VIEW -->
+        <div id="view-settings" class="page-view">
+            <div class="view-header">
+                <button id="nav-back" class="icon-btn-text">
+                    <span class="icon-sys ic-back"></span>
+                    <span data-i18n="backToDashboard">Back to Dashboard</span>
+                </button>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title" data-i18n="performanceSection">Scan Performance</div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="frequencyLabel">Real-time Frequency</span>
+                        <span class="setting-hint">Scan every <span id="freq-value">10</span> MB</span>
+                    </div>
+                    <input type="range" id="scan-freq-slider" min="5" max="100" step="5" value="10">
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="ramShieldLabel">Memory Shield</span>
+                        <span class="setting-hint" data-i18n="ramShieldHint">Scan exclusively in RAM (/dev/shm)</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="ram-toggle" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="remindersLabel">Safe Browsing Reminders</span>
+                        <span class="setting-hint" data-i18n="remindersHint">Show periodic security best-practice
+                            tips</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="reminder-toggle" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title" data-i18n="advancedSection">Advanced Security</div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="puaLabel">Enhanced PUA Protection</span>
+                        <span class="setting-hint" data-i18n="puaHint">Detect adware & Potentially Unwanted Apps</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="pua-toggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="mbLabel">Cloud Confirmation</span>
+                        <span class="setting-hint" data-i18n="mbHint">Verify suspicious files with MalwareBazaar</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="mb-toggle" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="setting-row" id="ghost-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="ghostLabel">Ghost Mode</span>
+                        <span id="ghost-hint" class="setting-hint" data-i18n="ghostHint">Disable ALL external API
+                            lookups</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="ghost-toggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="promptShieldLabel">Prompt Injection Shield</span>
+                        <span class="setting-hint" data-i18n="promptShieldHint">Block hidden prompt injections & field
+                            hijacking</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="prompt-injection-shield-toggle" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title" data-i18n="customPortalsSection">Secured Portals</div>
+                <div class="setting-row" style="border-bottom: none;">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="customPortalsLabel">Custom Protection List</span>
+                        <span class="setting-hint" data-i18n="customPortalsHint">Add domains for strict isolation &
+                            phishing checks</span>
+                    </div>
+                </div>
+                <div class="add-portal-container">
+                    <input type="text" id="new-portal-input" placeholder="e.g. yourbank.com" class="portal-input">
+                    <button id="add-portal-btn" class="add-btn" data-i18n="addBtn">Add</button>
+                </div>
+                <div id="custom-portals-list" class="portals-list">
+                    <!-- Custom portals injected here -->
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title" data-i18n="intelSyncSection">Intelligence Sync</div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="autoSyncLabel">Automatic Updates</span>
+                        <span class="setting-hint" data-i18n="autoSyncHint">Sync YARA & URLhaus every 3 hours</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="auto-sync-toggle" checked>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="urlIntelLabel">URL Intelligence</span>
+                        <span id="url-db-status-text" class="setting-hint" data-i18n="localBlocklist">Local
+                            Blocklist</span>
+                    </div>
+                    <button id="refresh-url-db" class="mini-btn">
+                        <span class="icon-sys ic-refresh"></span>
+                    </button>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="yaraLabel">YARA Signatures</span>
+                        <span id="yara-status-text" class="setting-hint" data-i18n="yaraHint">Community Rules</span>
+                    </div>
+                    <button id="refresh-yara-db" class="mini-btn" title="Sync & Sanitize YARA Rules">
+                        <span class="icon-sys ic-refresh"></span>
+                    </button>
+                </div>
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-label" data-i18n="autoBurnLabel">Auto-Burn Mode</span>
+                        <span class="setting-hint" data-i18n="autoBurnHint">Automatically neutralize zero-day threats
+                            globally</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="auto-burn-toggle">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <div class="section-title" data-i18n="appearanceSection">Appearance</div>
+                <div class="theme-toolbar">
+                    <div class="theme-pill active" data-theme="auto">Auto</div>
+                    <div class="theme-pill" data-theme="dark">Dark</div>
+                    <div class="theme-pill" data-theme="light">Light</div>
+                    <div class="theme-pill" data-theme="glass">Ghost</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+
+</html>

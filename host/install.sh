@@ -1,0 +1,216 @@
+#!/bin/bash
+
+# ClamFox Pro Installer - Vicious Hardening Edition
+# Moves the host to /opt/clamfox and registers it globally.
+
+set -e
+
+INSTALL_DIR="/opt/clamfox"
+HOST_NAME="clamav_host"
+MANIFEST_FILE="${HOST_NAME}.json"
+GLOBAL_MANIFEST_DIR="/usr/lib/mozilla/native-messaging-hosts"
+
+# 1. Ensure Root Privileges
+if [[ $EUID -ne 0 ]]; then
+   echo "🛡️  ClamFox Pro Installer requires root privileges for system hardening."
+   exec sudo "$0" "$@"
+fi
+
+echo "=================================================="
+echo "      CLAMFOX: Hardening & Installation           "
+echo "=================================================="
+
+# 2. Dependency Check & Auto-Install
+echo "🔍 Verifying System Dependencies..."
+MISSING_DEPS=()
+
+# Map commands to package names
+declare -A pkg_map
+pkg_map=( 
+    ["clamscan"]="clamav clamav-daemon" 
+    ["curl"]="curl" 
+    ["file"]="file" 
+    ["7z"]="p7zip-full" 
+    ["xclip"]="xclip" 
+    ["gettext"]="gettext" 
+    ["python3"]="python3-requests" # Ensure requests for YARA sync
+)
+
+for cmd in "${!pkg_map[@]}"; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "🚩 Missing: $cmd"
+        MISSING_DEPS+=("${pkg_map[$cmd]}")
+    fi
+done
+
+# Special check for requests library if python3 itself exists
+if command -v python3 &> /dev/null; then
+    if ! python3 -c "import requests" &> /dev/null; then
+        echo "🚩 Missing: python3-requests"
+        MISSING_DEPS+=("python3-requests")
+    fi
+fi
+
+if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    echo "📦 The following dependencies are missing: ${MISSING_DEPS[*]}"
+    
+    # Detect Package Manager
+    if command -v apt-get &> /dev/null; then
+        PKG_MANAGER="apt-get install -y"
+        update_cmd="apt-get update"
+    elif command -v dnf &> /dev/null; then
+        PKG_MANAGER="dnf install -y"
+        update_cmd=""
+    elif command -v pacman &> /dev/null; then
+        PKG_MANAGER="pacman -S --noconfirm"
+        update_cmd=""
+    else
+        echo "⚠️  Unknown package manager. Please install dependencies manually: ${MISSING_DEPS[*]}"
+        exit 1
+    fi
+
+    echo "⚙️  Automatically installing missing dependencies using $PKG_MANAGER..."
+    if [[ -n "$update_cmd" ]]; then $update_cmd; fi
+    $PKG_MANAGER ${MISSING_DEPS[*]}
+else
+    echo "✅ All dependencies present."
+fi
+
+# 3. Provision /opt/clamfox
+echo "🏗️  Provisioning $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR/locales"
+mkdir -p "$INSTALL_DIR/signatures"
+mkdir -p "$INSTALL_DIR/quarantine"
+
+# 4. Extract/Migrate Files
+echo "🚚 Migrating host files to system storage..."
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+cp "$DIR/clamav_engine.py" "$INSTALL_DIR/"
+cp "$DIR/yara_sanitizer.py" "$INSTALL_DIR/"
+if [ -d "$DIR/locales" ]; then
+    cp -r "$DIR/locales/"* "$INSTALL_DIR/locales/"
+fi
+if [ -d "$DIR/signatures" ]; then
+    cp -r "$DIR/signatures/"* "$INSTALL_DIR/signatures/"
+fi
+
+# Migration of config or generation of new one
+echo "🔐 Performing Vicious Baseline Seal..."
+SCRIPT_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$INSTALL_DIR/$HOST_NAME.py','rb').read()).hexdigest())")
+CLAM_PATH=$(command -v clamdscan || command -v clamscan)
+CLAM_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$CLAM_PATH','rb').read()).hexdigest())")
+
+if [ -f "$DIR/config.json" ]; then
+    cp "$DIR/config.json" "$INSTALL_DIR/"
+    python3 -c "import json; c=json.load(open('$INSTALL_DIR/config.json')); c['integrity_hash']='$SCRIPT_HASH'; c['binary_hash']='$CLAM_HASH'; json.dump(c, open('$INSTALL_DIR/config.json','w'), indent=4)"
+else
+    SECRET=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+    echo "{\"secret\": \"$SECRET\", \"anti_tamper\": true, \"last_rotation\": $(date +%s), \"integrity_hash\": \"$SCRIPT_HASH\", \"binary_hash\": \"$CLAM_HASH\"}" > "$INSTALL_DIR/config.json"
+fi
+
+# 5. Hardening Permissions
+echo "🔒 Hardening Filesystem Permissions..."
+ACTUAL_USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
+USER_GROUP=$(id -gn "$ACTUAL_USER")
+
+chown -R root:root "$INSTALL_DIR"
+chown -R "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/quarantine"
+chown -R "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/signatures"
+chmod 755 "$INSTALL_DIR"
+chmod 755 "$INSTALL_DIR/$HOST_NAME.py"
+chmod 644 "$INSTALL_DIR/config.json"
+chmod 700 "$INSTALL_DIR/quarantine" 
+chmod 755 "$INSTALL_DIR/signatures"
+chmod 644 "$INSTALL_DIR/urldb.txt" 2>/dev/null || touch "$INSTALL_DIR/urldb.txt" && chmod 644 "$INSTALL_DIR/urldb.txt"
+chown "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/urldb.txt" "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null || true
+chmod 644 "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null || true
+
+# 6. Global Registration
+echo "📋 Registering Native Messaging Host globally..."
+mkdir -p "$GLOBAL_MANIFEST_DIR"
+
+MANIFEST_SRC="$DIR/$MANIFEST_FILE"
+SCRIPT_PATH="$INSTALL_DIR/$HOST_NAME.py"
+
+sed "s|\"path\": \".*\"|\"path\": \"$SCRIPT_PATH\"|" "$MANIFEST_SRC" > "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE"
+chmod 644 "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE"
+
+# 7. Snap/Flatpak Bridge (Host registration)
+USER_HOME=$(eval echo "~$ACTUAL_USER")
+# Snap Firefox
+SNAP_DIR="$USER_HOME/snap/firefox/common/.mozilla/native-messaging-hosts"
+if [ -d "$USER_HOME/snap/firefox" ]; then
+    mkdir -p "$SNAP_DIR"
+    cp "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE" "$SNAP_DIR/"
+    chown -R "$ACTUAL_USER:$USER_GROUP" "$SNAP_DIR"
+fi
+# Flatpak Firefox
+FLATPAK_DIR="$USER_HOME/.var/app/org.mozilla.firefox/.mozilla/native-messaging-hosts"
+if [ -d "$USER_HOME/.var/app/org.mozilla.firefox" ]; then
+    mkdir -p "$FLATPAK_DIR"
+    cp "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE" "$FLATPAK_DIR/"
+    chown -R "$ACTUAL_USER:$USER_GROUP" "$FLATPAK_DIR"
+fi
+
+# 8. Managed Extension Sideloading (Enterprise Policy)
+echo "📦 Packaging and Sideloading Extension (Non-Forced)..."
+echo "   (Using 'normal_installed' mode to allow user control while ensuring availability)"
+
+if ! command -v zip &> /dev/null; then
+    $PKG_MANAGER zip
+fi
+
+PARENT_DIR="$(cd "$DIR/.." && pwd)"
+TEMP_BUILD="/tmp/clamfox_build"
+rm -rf "$TEMP_BUILD"
+mkdir -p "$TEMP_BUILD"
+cp -r "$PARENT_DIR/background.js" "$PARENT_DIR/content.js" "$PARENT_DIR/content.css" \
+      "$PARENT_DIR/design_tokens.css" "$PARENT_DIR/manifest.json" "$PARENT_DIR/popup" \
+      "$PARENT_DIR/icons" "$PARENT_DIR/_locales" "$TEMP_BUILD/"
+
+(cd "$TEMP_BUILD" && zip -r "$INSTALL_DIR/clamfox.xpi" ./* > /dev/null)
+rm -rf "$TEMP_BUILD"
+chmod 644 "$INSTALL_DIR/clamfox.xpi"
+
+POLICY_DIR="/etc/firefox/policies"
+mkdir -p "$POLICY_DIR"
+
+cat <<EOF > "$POLICY_DIR/policies.json"
+{
+  "policies": {
+    "ExtensionSettings": {
+      "clamfox@ovidio.me": {
+        "installation_mode": "normal_installed",
+        "install_url": "file:///opt/clamfox/clamfox.xpi"
+      }
+    }
+  }
+}
+EOF
+
+# 9. Mandatory Access Control (AppArmor/SELinux) - FORGONE FOR COMPATIBILITY
+echo "🛡️  Clearing legacy Mandatory Access Control (MAC) policies..."
+APPARMOR_PROFILE="/etc/apparmor.d/opt.clamfox.clamav_engine.py"
+if [ -f "$APPARMOR_PROFILE" ]; then
+    echo "🗑️  Removing legacy AppArmor profile..."
+    rm -f "$APPARMOR_PROFILE"
+    if command -v apparmor_parser &> /dev/null; then
+        # Use -R to remove it from the kernel
+        apparmor_parser -R "$APPARMOR_PROFILE" 2>/dev/null || true
+    fi
+fi
+echo "✅ Native protection active (MAC bypassed for stability)."
+
+# 10. Final Summary
+echo "=================================================="
+echo "✅ ClamFox Host installed in /opt/clamfox"
+echo "✅ Registered for all Firefox variants (Deb, Snap, Flatpak)"
+echo "✅ Extension sideloaded (Removable by user)"
+echo "✅ Privacy Shield & Anti-Tamper Ready"
+echo "--------------------------------------------------"
+echo "🚀 IMPORTANT: Restart Firefox to activate the persistent shield."
+echo "🚀 Performance Tip:"
+echo "   sudo systemctl enable --now clamav-daemon"
+echo "=================================================="

@@ -1,0 +1,390 @@
+{
+    "extensionName": {
+        "message": "ClamFox"
+    },
+    "extensionDescription": {
+        "message": "Scans downloads and page content using your local ClamAV installation."
+    },
+    "popupTitle": {
+        "message": "ClamAV Shield"
+    },
+    "checking": {
+        "message": "Checking..."
+    },
+    "settings": {
+        "message": "Settings"
+    },
+    "scanTab": {
+        "message": "Scan Current Tab"
+    },
+    "missingTitle": {
+        "message": "ClamAV Not Found!"
+    },
+    "missingHint": {
+        "message": "Please install clamav via terminal."
+    },
+    "engineLabel": {
+        "message": "Scanner Engine"
+    },
+    "onAccessLabel": {
+        "message": "On-Access Shield"
+    },
+    "anonymityLabel": {
+        "message": "Anonymity"
+    },
+    "local": {
+        "message": "Local"
+    },
+    "dbLabel": {
+        "message": "Virus Database"
+    },
+    "urlLabel": {
+        "message": "URL Reputation"
+    },
+    "urlIntelLabel": {
+        "message": "URL Intelligence"
+    },
+    "localCache": {
+        "message": "Local Cache"
+    },
+    "recentActivity": {
+        "message": "Recent Activity"
+    },
+    "noScans": {
+        "message": "No scans recorded"
+    },
+    "blockedSites": {
+        "message": "Blocked Sites"
+    },
+    "export": {
+        "message": "Export"
+    },
+    "json": {
+        "message": "JSON"
+    },
+    "cleanHistory": {
+        "message": "Clean history"
+    },
+    "backToDashboard": {
+        "message": "Back to Dashboard"
+    },
+    "performanceSection": {
+        "message": "Scan Performance"
+    },
+    "frequencyLabel": {
+        "message": "Real-time Frequency"
+    },
+    "frequencyHint": {
+        "message": "Scan every $count$ MB",
+        "placeholders": {
+            "count": {
+                "content": "$1"
+            }
+        }
+    },
+    "ramShieldLabel": {
+        "message": "Memory Shield"
+    },
+    "ramShieldHint": {
+        "message": "Scan exclusively in RAM (/dev/shm)"
+    },
+    "remindersLabel": {
+        "message": "Safe Browsing Reminders"
+    },
+    "remindersHint": {
+        "message": "Show periodic security best-practice tips"
+    },
+    "advancedSection": {
+        "message": "Advanced Security"
+    },
+    "puaLabel": {
+        "message": "Enhanced PUA Protection"
+    },
+    "puaHint": {
+        "message": "Detect adware & Potentially Unwanted Apps"
+    },
+    "mbLabel": {
+        "message": "Cloud Confirmation"
+    },
+    "mbHint": {
+        "message": "Verify suspicious files with MalwareBazaar"
+    },
+    "ghostLabel": {
+        "message": "Ghost Mode"
+    },
+    "ghostHint": {
+        "message": "Disable ALL external API lookups"
+    },
+    "promptShieldLabel": {
+        "message": "Prompt Injection Shield"
+    },
+    "promptShieldHint": {
+        "message": "Block hidden prompt injections & field hijacking"
+    },
+    "intelSyncSection": {
+        "message": "Intelligence Sync"
+    },
+    "autoSyncLabel": {
+        "message": "Automatic Updates"
+    },
+    "autoSyncHint": {
+        "message": "Sync YARA & URLhaus every 3 hours"
+    },
+    "localBlocklist": {
+        "message": "Local Blocklist"
+    },
+    "yaraLabel": {
+        "message": "YARA Signatures"
+    },
+    "yaraHint": {
+        "message": "Community Rules"
+    },
+    "autoBurnLabel": {
+        "message": "Auto-Burn Mode"
+    },
+    "autoBurnHint": {
+        "message": "Automatically neutralize zero-day threats globally"
+    },
+    "siteBlockedTitle": {
+        "message": "🛑 SITE BLOCKED"
+    },
+    "testPayloadMessage": {
+        "message": "ClamFox intercepted a simulated test payload."
+    },
+    "malwareSiteMessage": {
+        "message": "ClamFox intercepted a known malware site."
+    },
+    "authorizing": {
+        "message": "Authorizing..."
+    },
+    "authorizeChanges": {
+        "message": "Authorize Changes"
+    },
+    "authorizationFailed": {
+        "message": "Authorization failed: $err$",
+        "placeholders": {
+            "err": {
+                "content": "$1"
+            }
+        }
+    },
+    "connectionError": {
+        "message": "Error connecting to host."
+    },
+    "clipperShieldAlert": {
+        "message": "A malicious script tried to swap your crypto address!"
+    },
+    "credentialGuardTitle": {
+        "message": "⚠️ UNTRUSTED PORTAL"
+    },
+    "credentialGuardMessage": {
+        "message": "This site is not a verified brand. Use caution before entering passwords."
+    },
+    "appearanceSection": {
+        "message": "Appearance"
+    },
+    "threatDetected": {
+        "message": "⚠️ THREAT DETECTED"
+    },
+    "threatMessage": {
+        "message": "ClamFox found \"$virus$\" on $displayName$. Access has been blocked for your protection.",
+        "placeholders": {
+            "virus": {
+                "content": "$1"
+            },
+            "displayName": {
+                "content": "$2"
+            }
+        }
+    },
+    "scanCompleteSafe": {
+        "message": "Scan Complete: SAFE"
+    },
+    "safeMessage": {
+        "message": "No threats found on $displayName$. This $typeLabel$ is secure to access.",
+        "placeholders": {
+            "displayName": {
+                "content": "$1"
+            },
+            "typeLabel": {
+                "content": "$2"
+            }
+        }
+    },
+    "scanError": {
+        "message": "ClamFox: Scan Error"
+    },
+    "errorMessage": {
+        "message": "The scanner encountered a problem: $err$",
+        "placeholders": {
+            "err": {
+                "content": "$1"
+            }
+        }
+    },
+    "hostMissing": {
+        "message": "ClamAV Host Missing"
+    },
+    "hostMissingMessage": {
+        "message": "The native scanner host is not responding. Please ensure ClamAV and the host script are installed."
+    },
+    "scanLink": {
+        "message": "🛡️ ClamAV: Scan link target"
+    },
+    "scanImage": {
+        "message": "🛡️️ ClamAV: Scan image"
+    },
+    "site": {
+        "message": "site"
+    },
+    "file": {
+        "message": "file"
+    },
+    "protectionEnabled": {
+        "message": "Protection Enabled"
+    },
+    "scannerDown": {
+        "message": "Scanner Down"
+    },
+    "monitoring": {
+        "message": "Monitoring..."
+    },
+    "active": {
+        "message": "Active"
+    },
+    "inactive": {
+        "message": "Inactive"
+    },
+    "updatedRecently": {
+        "message": "Updated recently"
+    },
+    "updateRequired": {
+        "message": "Update required"
+    },
+    "scanningWithPercent": {
+        "message": "Scanning... $percent$%",
+        "placeholders": {
+            "percent": {
+                "content": "$1"
+            }
+        }
+    },
+    "engineUpdated": {
+        "message": "Engine Updated"
+    },
+    "updateFailed": {
+        "message": "Update Failed"
+    },
+    "updating": {
+        "message": "Updating..."
+    },
+    "hostError": {
+        "message": "Host Error"
+    },
+    "intelligenceMissing": {
+        "message": "Intelligence Missing"
+    },
+    "engineMissing": {
+        "message": "Engine Missing"
+    },
+    "updatedHAgo": {
+        "message": "Updated $hours$h ago",
+        "placeholders": {
+            "hours": {
+                "content": "$1"
+            }
+        }
+    },
+    "updatedDAgo": {
+        "message": "Updated $days$d ago",
+        "placeholders": {
+            "days": {
+                "content": "$1"
+            }
+        }
+    },
+    "malwareRecent": {
+        "message": "Malware: Recent"
+    },
+    "malwareHAgo": {
+        "message": "Malware: $hours$h ago",
+        "placeholders": {
+            "hours": {
+                "content": "$1"
+            }
+        }
+    },
+    "phishRecent": {
+        "message": "Phish: Recent"
+    },
+    "phishHAgo": {
+        "message": "Phish: $hours$h ago",
+        "placeholders": {
+            "hours": {
+                "content": "$1"
+            }
+        }
+    },
+    "installClamAV": {
+        "message": "To install ClamAV on your system:"
+    },
+    "optimizeClamAV": {
+        "message": "Optimization for $engine$:",
+        "placeholders": {
+            "engine": {
+                "content": "$1"
+            }
+        }
+    },
+    "safeBrowsing": {
+        "message": "Safe Browsing"
+    },
+    "safeBrowsingHint": {
+        "message": "Remember to avoid suspicious ads or fishy emails."
+    },
+    "promptInjectionRisk": {
+        "message": "Prompt Injection Risk"
+    },
+    "promptInjectionMessage": {
+        "message": "SECURITY: Page contains invisible instructions."
+    },
+    "inputHijackBlocked": {
+        "message": "Input Hijack Blocked"
+    },
+    "inputHijackMessage": {
+        "message": "Security: Background script tried to modify prompt."
+    },
+    "customPortalsSection": {
+        "message": "Secured Portals"
+    },
+    "customPortalsLabel": {
+        "message": "Custom Protection List"
+    },
+    "customPortalsHint": {
+        "message": "Add domains for strict isolation & phishing checks"
+    },
+    "addBtn": {
+        "message": "Add"
+    },
+    "noCustomPortals": {
+        "message": "No custom portals added"
+    },
+    "blockedLabel": {
+        "message": "Blocked"
+    },
+    "audit": {
+        "message": "Audit"
+    },
+    "suppressTrustedToastsLabel": {
+        "message": "Suspend toast alerts on trusted sites"
+    },
+    "suppressTrustedToastsHint": {
+        "message": "Stop showing notification toasts on official brands and whitelisted domains"
+    },
+    "clearHistory": {
+        "message": "Clear"
+    },
+    "confirmClearHistory": {
+        "message": "Are you sure you want to clear the history?"
+    }
+}

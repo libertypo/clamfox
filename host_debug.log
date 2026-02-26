@@ -1,0 +1,272 @@
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 79
+Payload: {"action":"scan","target":"/home/ovidio/Downloads/eicar_com.zip","type":"file"}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Sending: {'status': 'infected', 'target': '/home/ovidio/Downloads/eicar_com.zip', 'virus': '{HEX}EICAR.TEST.3.UNOFFICIAL'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 80
+Payload: {"action":"scan","target":"https://secure.eicar.org/eicar.com.txt","type":"url"}
+Host script started
+Header Length: 79
+Payload: {"action":"scan","target":"/home/ovidio/Downloads/eicar.com.txt","type":"file"}
+Sending: {'status': 'infected', 'target': 'https://secure.eicar.org/eicar.com.txt', 'virus': '{HEX}EICAR.TEST.3.UNOFFICIAL'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Sending: {'status': 'infected', 'target': '/home/ovidio/Downloads/eicar.com.txt', 'virus': '{HEX}EICAR.TEST.3.UNOFFICIAL'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': None, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 70
+Payload: {"action":"scan","target":"about:addons","type":"url","force_vt":true}
+Host script started
+Header Length: 70
+Payload: {"action":"scan","target":"about:addons","type":"url","force_vt":true}
+Sending: {'target': 'about:addons', 'status': 'clean'}
+Sending: {'target': 'about:addons', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': None, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Updating local URLhaus cache (Atomic)...
+URLhaus cache updated successfully.
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519515.5544972, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 25
+Payload: {"action":"update_urldb"}
+Updating local URLhaus cache (Atomic)...
+URLhaus cache updated successfully.
+Sending: {'status': 'ok', 'url_db_last_update': 1771519523.2104702}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 101
+Payload: {"action":"scan","target":"https://www.youtube.com/watch?v=71dYr8Lzrh0","type":"url","force_vt":true}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Sending: {'target': 'https://www.youtube.com/watch?v=71dYr8Lzrh0', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 110
+Payload: {"action":"scan","target":"https://support.google.com/merchants/answer/14113862","type":"url","force_vt":true}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 284
+Payload: {"action":"scan","target":"https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1","type":"url","force_vt":true}
+Sending: {'target': 'https://support.google.com/merchants/answer/14113862', 'status': 'clean'}
+Host script started
+Header Length: 284
+Payload: {"action":"scan","target":"https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1","type":"url","force_vt":true}
+Host script started
+Header Length: 284
+Payload: {"action":"scan","target":"https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1","type":"url","force_vt":true}
+Host script started
+Header Length: 284
+Payload: {"action":"scan","target":"https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1","type":"url","force_vt":true}
+Host script started
+Header Length: 151
+Payload: {"action":"scan","target":"https://www.reddit.com/r/SkincareAddiction/comments/yotn3s/product_question_glamfox_products/","type":"url","force_vt":true}
+Sending: {'target': 'https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1', 'status': 'clean'}
+Sending: {'target': 'https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1', 'status': 'clean'}
+Sending: {'target': 'https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1', 'status': 'clean'}
+Sending: {'target': 'https://www.google.com/search?client=firefox-b-d&hs=k029&sca_esv=3fa20b0e5d950a51&sxsrf=ANbL-n76Fw4zPTTQJuyqd9-Tzl5GmS6IUA:1771510220954&q=glamfox&sa=X&ved=2ahUKEwjD-b3r3eWSAxW2R_4FHaf7MAEQ7xYoAHoECA8QAQ&biw=1920&bih=966&dpr=1', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Sending: {'target': 'https://www.reddit.com/r/SkincareAddiction/comments/yotn3s/product_question_glamfox_products/', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 102
+Payload: {"action":"scan","target":"https://misu-skincare.de/collections/glamfox","type":"url","force_vt":true}
+Sending: {'target': 'https://misu-skincare.de/collections/glamfox', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 131
+Payload: {"action":"check_url","target":"https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025"}
+Sending: {'status': 'clean', 'url': 'https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 155
+Payload: {"action":"scan","target":"https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025","type":"url","force_vt":true}
+Sending: {'target': 'https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025', 'status': 'clean'}
+Host script started
+Header Length: 155
+Payload: {"action":"scan","target":"https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025","type":"url","force_vt":true}
+Sending: {'target': 'https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025', 'status': 'clean'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 18
+Payload: {"action":"check"}
+Sending: {'status': 'ok', 'path': '/usr/bin/clamscan', 'install_cmd': 'sudo pacman -S clamav', 'db_last_update': 1771410239.7049332, 'url_db_last_update': 1771519523.2104702, 'version': 'ClamAV 1.5.1/27916/Wed Feb 18 08:24:48 2026'}
+Host script started
+Header Length: 155
+Payload: {"action":"scan","target":"https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025","type":"url","force_vt":true}
+Sending: {'status': 'progress', 'percent': 10, 'msg': 'Preparing scan...'}
+Sending: {'status': 'progress', 'percent': 25, 'msg': 'Downloading content...'}
+Sending: {'status': 'progress', 'percent': 50, 'msg': 'Running ClamAV...'}
+Sending: {'status': 'progress', 'percent': 90, 'msg': 'Finalizing...'}
+Sending: {'target': 'https://www.comune.venezia.it/it/content/clone-bando-erp-edilizia-residenziale-pubblica-anno-2025', 'status': 'clean'}

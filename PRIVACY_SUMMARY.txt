@@ -1,0 +1,74 @@
+==================================================
+CLAMFOX - PRIVACY ARCHITECTURE SUMMARY
+==================================================
+
+This extension was designed with a "Privacy-First" security model, 
+aiming to provide enterprise-grade protection without the massive 
+data collection typical of commercial Antivirus software.
+
+--------------------------------------------------
+✅ THE PRIVACY PROS (The Wins)
+--------------------------------------------------
+
+1. 100% LOCAL FILE SCANNING (ClamAV)
+   - Unlike cloud AVs, your files are NEVER uploaded to a server
+     for analysis. Scanning happens entirely on your CPU.
+   
+2. PRIVATE BROWSING PROTECTION (URLhaus Local Cache)
+   - Your web history is 100% private. 
+   - We download the entire malware blocklist to your SSD. 
+   - Every site you visit is checked against this local file.
+   - ZERO URLs are sent to URLhaus/abuse.ch during browsing.
+   - "Strict Blocking" mode ensures the site is checked BEFORE 
+     the browser even connects to the server. No more "flash" of 
+     malicious content.
+
+3. LOCAL-ONLY BLOCK HISTORY
+   - The "Block History" and scan logs are stored EXCLUSIVELY in 
+     your browser's local storage. This data is never synced
+     to the cloud or shared with third parties.
+
+4. SECURE HANDSHAKE & ANTI-TAMPER
+   - A unique, cryptographically random secret is generated on 
+     your machine during install. This "Handshake" ensures that 
+     only the extension can talk to your scanner bridge.
+   - Host script integrity is verified locally before any scan.
+
+5. NO USER ACCOUNTS OR TRACKING
+   - No registration, no analytics, and no telemetry.
+   - The extension does not generate a unique User ID.
+
+6. OPEN SOURCE & TRANSPARENT
+   - All communication between the browser and the host is 
+     visible in the project code (Python/JS).
+
+--------------------------------------------------
+⚠️ THE PRIVACY CONS (The Trade-offs)
+--------------------------------------------------
+
+1. HASH LEAKS (MalwareBazaar)
+   - If a file is flagged as "Suspicious" by ClamAV, the extension 
+     generates a SHA256 "fingerprint" (hash) and sends it to 
+     MalwareBazaar for confirmation.
+   - RISK: They know a specific file exists on your system, 
+     but NOT who you are or what the file contains.
+
+2. IP EXPOSURE DURING UPDATES
+   - Once an hour, the bridge script connects to URLhaus (abuse.ch) 
+     to download the latest blocklist updates.
+   - RISK: Their server logs will see your IP address requesting 
+     the update file periodically.
+
+3. SUDO/NATIVE ACCESS
+   - To work, the extension requires a "Native Host" bridge. 
+   - This gives the Python script access to your local files 
+     (required to scan them).
+
+--------------------------------------------------
+📊 FINAL VERDICT: "REPUTABLE GRADE"
+--------------------------------------------------
+Compared to Chrome's "Safe Browsing" or Windows Defender, 
+ClamFox is significantly more private. While it does 
+"ping" security communities for intelligence, it never 
+shares your identity or your actual browsing habits.
+==================================================

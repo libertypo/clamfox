@@ -1,0 +1,59 @@
+:root {
+    --primary: #6366f1;
+    --primary-glow: rgba(99, 102, 241, 0.4);
+    --bg: #000000;
+    --surface: rgba(255, 255, 255, 0.05);
+    --surface-solid: #0d0d0d;
+    --text: #ffffff;
+    --text-dim: #a0a0a0;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --border: rgba(255, 255, 255, 0.1);
+
+    /* Semantic States (Translucent) */
+    --success-bg: rgba(255, 255, 255, 0.1);
+    --success-border: rgba(255, 255, 255, 0.3);
+    --warning-bg: rgba(255, 255, 255, 0.1);
+    --warning-border: rgba(255, 255, 255, 0.3);
+    --danger-bg: rgba(255, 255, 255, 0.1);
+
+    /* UI Utility Tokens */
+    --item-bg: rgba(255, 255, 255, 0.05);
+    --item-hover: rgba(255, 255, 255, 0.1);
+    --divider: rgba(255, 255, 255, 0.2);
+    --track-bg: rgba(255, 255, 255, 0.2);
+    --track-thumb-bg: rgba(255, 255, 255, 0.6);
+    --shadow-color: rgba(0, 0, 0, 1);
+}
+
+.light-mode {
+    --primary: #4f46e5;
+    --primary-glow: rgba(79, 70, 229, 0.2);
+    --bg: #ffffff;
+    --surface: rgba(0, 0, 0, 0.05);
+    --surface-solid: #fcfcfc;
+    --text: #1a1a1a;
+    --text-dim: #64748b;
+    --success: #16a34a;
+    --danger: #dc2626;
+    --warning: #d97706;
+    --border: rgba(0, 0, 0, 0.1);
+
+    --success-bg: rgba(0, 0, 0, 0.1);
+    --success-border: rgba(0, 0, 0, 0.3);
+    --warning-bg: rgba(0, 0, 0, 0.1);
+    --warning-border: rgba(0, 0, 0, 0.3);
+    --danger-bg: rgba(0, 0, 0, 0.1);
+
+    --item-bg: rgba(0, 0, 0, 0.05);
+    --item-hover: rgba(0, 0, 0, 0.1);
+    --divider: rgba(0, 0, 0, 0.2);
+    --track-bg: rgba(0, 0, 0, 0.2);
+    --track-thumb-bg: rgba(0, 0, 0, 0.6);
+    --shadow-color: rgba(255, 255, 255, 1);
+}
+
+.glass-mode {
+    --bg-gradient: linear-gradient(135deg, #000000 0%, #333333 100%);
+}
