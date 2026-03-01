@@ -1847,6 +1847,22 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 log_debug(f"Internal Check error: {e}")
                 send_message({"status": "error", "error": f"Check logic failed: {e}"})
             return
+        elif action == "rotate_secret":
+            # Security: Session Key Rotation
+            # Generates a new random secret, replaces the old one in the keyring and config,
+            # and returns it to the extension. This limits the blast radius of any secret leak.
+            try:
+                new_secret = secrets.token_urlsafe(32)
+                keyring_set("secret", new_secret)
+                config["secret"] = new_secret
+                config["last_rotation"] = time.time()
+                save_config(config)
+                log_debug("🔑 Session secret rotated successfully.")
+                send_message({"status": "ok", "secret": new_secret, "rotated_at": config["last_rotation"]})
+            except Exception as e:
+                log_debug(f"Secret rotation failed: {e}")
+                send_message({"status": "error", "error": f"Rotation failed: {e}"})
+            return
         elif action == "report_threat":
             target = message.get("target")
             threat_type = message.get("type", "unknown")

@@ -1188,6 +1188,14 @@ async function setupIntelligenceAlarm() {
     } else {
         browser.alarms.clear("intelligence-sync");
     }
+
+    // Security: Session key rotation every 6 hours.
+    // Even if the session secret is ever observed (e.g. via a compromised DevTools session),
+    // it will be invalidated and replaced automatically, limiting the attack window.
+    browser.alarms.create("secret-rotation", {
+        delayInMinutes: 360,       // First rotation after 6 hours
+        periodInMinutes: 360       // Then every 6 hours
+    });
 }
 
 // Handle Background Alarms
@@ -1203,6 +1211,26 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
             dbg("✅ Scheduled Sync Completed.");
         } catch (e) {
             console.error("❌ Scheduled Sync Failed:", e);
+        }
+    } else if (alarm.name === "secret-rotation") {
+        // Security: Automatic session key rotation
+        dbg("🔑 Scheduled session key rotation starting...");
+        try {
+            const currentSecret = await getSecret();
+            const response = await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+                action: "rotate_secret",
+                secret: currentSecret
+            });
+            if (response && response.status === "ok" && response.secret) {
+                SESSION_HOST_SECRET = response.secret;
+                dbg("🔑 Session secret rotated successfully.");
+            } else {
+                console.warn("🔑 Secret rotation returned unexpected response:", response);
+            }
+        } catch (e) {
+            console.error("🔑 Session key rotation failed:", e);
+            // On failure, force a fresh handshake on next request
+            SESSION_HOST_SECRET = null;
         }
     }
 });
