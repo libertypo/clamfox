@@ -12,10 +12,9 @@
         "activeTab",
         "menus",
         "contextMenus",
-        "scripting",
         "webRequest",
         "alarms",
-        "cookies"
+        "declarativeNetRequest"
     ],
     "host_permissions": [
         "<all_urls>"
