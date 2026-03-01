@@ -1,0 +1,108 @@
+[
+    {
+        "id": 1,
+        "priority": 1,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "urlFilter": "||127.0.0.1",
+            "resourceTypes": [
+                "main_frame",
+                "sub_frame",
+                "xmlhttprequest",
+                "websocket",
+                "other"
+            ],
+            "excludedInitiatorDomains": [
+                "127.0.0.1",
+                "localhost"
+            ]
+        }
+    },
+    {
+        "id": 2,
+        "priority": 1,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "urlFilter": "||localhost",
+            "resourceTypes": [
+                "main_frame",
+                "sub_frame",
+                "xmlhttprequest",
+                "websocket",
+                "other"
+            ],
+            "excludedInitiatorDomains": [
+                "127.0.0.1",
+                "localhost"
+            ]
+        }
+    },
+    {
+        "id": 3,
+        "priority": 1,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "urlFilter": "||0.0.0.0",
+            "resourceTypes": [
+                "main_frame",
+                "sub_frame",
+                "xmlhttprequest",
+                "websocket",
+                "other"
+            ],
+            "excludedInitiatorDomains": [
+                "127.0.0.1",
+                "localhost",
+                "0.0.0.0"
+            ]
+        }
+    },
+    {
+        "id": 4,
+        "priority": 1,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "urlFilter": "||192.168.*",
+            "resourceTypes": [
+                "main_frame",
+                "sub_frame",
+                "xmlhttprequest",
+                "websocket",
+                "other"
+            ],
+            "excludedInitiatorDomains": [
+                "127.0.0.1",
+                "localhost"
+            ]
+        }
+    },
+    {
+        "id": 5,
+        "priority": 1,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "urlFilter": "||10.*",
+            "resourceTypes": [
+                "main_frame",
+                "sub_frame",
+                "xmlhttprequest",
+                "websocket",
+                "other"
+            ],
+            "excludedInitiatorDomains": [
+                "127.0.0.1",
+                "localhost"
+            ]
+        }
+    }
+]

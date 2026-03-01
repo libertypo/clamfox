@@ -1,0 +1,104 @@
+[x] PERFORMANCE & ENGINE
+    - [x] ClamD Support: Add support for communicating with the ClamAV Daemon 
+          (clamd) via unix sockets for 10x faster scan response times.
+    - [x] FreshClam Integration: Add a "Force DB Update" button that triggers 
+          freshclam directly from the dashboard.
+    - [x] Parallel Scanning: Using OS-level process isolation and threading in the Python bridge.
+    - [x] Hardware-Level Scaling: Use ProcessPoolExecutor for massive parallel scanning of large batches (Implemented).
+
+[x] SECURITY HARDENING
+    - [x] Secret Rotation: Automatically rotate the Anti-Tamper secret every 
+          15 days to prevent long-term credential leakage.
+    - [x] Signed Binaries: Implement helper checks to verify the GPG signature 
+          of the ClamAV engine on every startup. (Implemented via Binary Sealing)
+    - [x] Memory-Only Mode: Option to scan downloads in RAM disks (/dev/shm) 
+          to ensure no traces of malicious files ever touch the physical SSD.
+    - [x] Quarantine System: Safely move infected files to a restricted 
+          'chmod 000' folder instead of immediate deletion.
+    - [x] Sandboxing: Use Firejail or systemd-run to confine the scanner 
+          process to a minimal, read-only environment. (Template provided)
+    - [x] Resource Watchdog: Implement a "Circuit Breaker" to prevent 
+          CPU exhaustion during high-frequency scan requests (DoS protection).
+    - [x] Keyring Shielding: Store the security handshake secret and integrity 
+          hashes in the OS System Keyring (libsecret).
+    - [x] AppArmor Profile: Provide a hardened security profile to restrict 
+          the bridge's filesystem and network access.
+    - [x] One-Click Re-Seal: Authorize manual script changes via a secure 
+          OS password prompt (pkexec) directly from the dashboard.
+
+[x] ADVANCED SCANNING
+    - [x] MIME-Type Verification: Detect "Double Extension" attacks by 
+          verifying that the file content matches its declared extension.
+    - [x] Archive Depth Control: Protection against 'Zip Bombs' by limiting 
+          the recursion depth of compressed file analysis.
+    - [x] Verified Updates: Hash verification of the URLhaus blocklist 
+          to ensure atomic and consistent updates.
+    - [x] On-Access Status: Real-time dashboard indicator for the system-wide 
+          ClamAV 'clamonacc' service status.
+    - [x] YARA Rule Support: Native support for custom .yar rules. Place 
+          signatures in 'host/signatures/' for advanced pattern matching.
+
+[x] USER EXPERIENCE (UI/UX)
+    - [x] Badge Progress: Show a small progress bar or percentage indicator 
+          directly on the extension icon badge during scans.
+    - [x] Enhanced Context Menu: Add "Scan Link Target" to the right-click menu 
+          to check a download URL before actually starting the download.
+    - [x] Theme Engine: Added Dark Mode, Light Mode, and "Ghost Mode" 
+          (Glassmorphism) toggle for a premium dashboard experience.
+    - [x] Exportable Logs: Allow users to export their Block History and Scan 
+          Logs as signed JSON reports for security auditing.
+    - [x] View Separation: Divided the UI into a clean Status Dashboard 
+          and a detailed Control Center (Settings) for better UX.
+    - [x] Clear History: Added buttons to clear scan and block logs with confirmation.
+
+[x] PRIVACY ENHANCEMENTS
+    - [x] "Ghost Mode": A one-click toggle to disable ALL external API lookups 
+          (MalwareBazaar) for max-privacy environments. Activatable when 
+          VPN/Tor is not in use.
+    - [x] Privacy Tunnel: Route update requests (URLhaus) through TOR or a 
+          VPN (Proton/Nord). Using socks5h to prevent DNS leaks.
+    - [x] WebRTC IP Leak Prevention: Forceful routing of P2P traffic to prevent VPN bypassing.
+
+[ ] THREAT HUNTING (OFFENSIVE COUNTER-INTELLIGENCE)
+    - [x] Deep Unmasking: Follow and scan the entire redirect chain for links 
+          before landing. Block if any jump hit a high-threat IP.
+    - [x] Clipper Shield: Monitor clipboard for suspicious automated changes 
+          (Crypto wallet swapping) and alert the user.
+    - [x] Community Burn: One-click (or auto) reporting of verified threats 
+          to URLhaus, PhishTank, and Google Safe Browsing.
+    - [x] Encrypted Community Burn: Condition-aware encryption (Active if Tor/VPN is off) for forensic sharing.
+    - [x] Phishing.Database: Integrated Mitchell Krog's active intelligence 
+          for real-time phishing domain protection.
+    - [x] HVT Shield: Heuristic detection of homographs and typosquatting 
+          on the world's top financial and login portals.
+    - [x] Prompt Injection Shield: Specialized defense against "Invisible 
+          Instructions" and background field hijacking on chat portals.
+    - [x] High-Threat Container Analysis: Specialized forensic inspection of 
+          ISO, VHD, and LNK files to detect HTML smuggling artifacts.
+    - [x] Honeypot Decoys: Inject fake crypto/credentials to catch scraping scripts.
+    - [x] Formjacking & Keylogger Detection: Monitor suspicious listeners on inputs.
+    - [x] Exfiltration Interception: Scan POST/WebSocket data flows.
+    - [x] Visual Anti-Phishing: DOM similarity and Favicon spoofing checks.
+    - [x] Drive-by Download Detection: Intercept non-organic script-triggered downloads.
+    - [x] Anti DNS-Rebinding: Block public websites from scanning local IP space.
+    - [x] Behavioral Fingerprinting: YARA-like signatures for active JS behaviors.
+    - [x] Canvas / WebGL Fingerprint Poisoning: Inject noise into image data to break tracking hashes.
+    - [x] C2 Beacon Activity Detection: Identify perfectly metronomic background requests.
+    - [x] Local Port Scan Detection: Block scripts rapidly sweeping local ascending ports via WebSocket.
+    - [x] DOM Anomaly & Overlay Shield: Detect transparent divs covering inputs to harvest clicks.
+    - [x] Targeted HVT CSP: Selective Content-Security-Policy injection for financial portals.
+
+[X] RELEASE PREP
+    - [x] Final Localization (English & Italian) for Host and Extension.
+    - [x] Versioning: Increment to 0.0.5.8.
+    - [x] Best Practices Audit & Hardening: 
+          - Implemented tab telemetry memory cleanup.
+          - Added thread-safe config I/O for host-bridge concurrency.
+          - Implemented graceful signal handling for native executors.
+    - [ ] Deploy to "benevolent guinea pig" for beta tests.
+
+==================================================
+Updated: 2026-02-25
+Version: 0.0.5.8
+==================================================
+

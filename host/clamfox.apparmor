@@ -1,0 +1,63 @@
+#include <tunables/global>
+
+/opt/clamfox/clamav_engine.py {
+  #include <abstractions/base>
+  #include <abstractions/python>
+  #include <abstractions/nameservice>
+
+  # Allow execution of scanner binaries and utilities
+  /usr/bin/python* ix,
+  /usr/bin/env ix,
+  /usr/bin/sh ix,
+  /usr/bin/bash ix,
+  /usr/bin/secret-tool ix,
+  /usr/bin/systemctl ix,
+  /usr/bin/xclip ix,
+  /usr/bin/clamscan ix,
+  /usr/bin/clamdscan ix,
+  /usr/bin/freshclam ix,
+  /usr/bin/curl ix,
+  /usr/bin/sha256sum ix,
+  /usr/bin/file ix,
+  /usr/bin/7z ix,
+  /usr/bin/ip ix,
+  /usr/bin/nmcli ix,
+  /usr/bin/resolvectl ix,
+  /usr/bin/protonvpn-cli ix,
+  /usr/bin/nordvpn ix,
+  
+  # Python library paths (broadened for Arch/Manjaro compatibility)
+  /usr/lib/python3*/** r,
+  /usr/lib/python3*/**.so* mr,
+  /usr/local/lib/python3*/** r,
+  /usr/include/python3*/** r,
+
+  # Allow reading/writing its own directory (for logs, quarantine, config)
+  /opt/clamfox/ r,
+  /opt/clamfox/** rw,
+
+  # Runtime and Temp areas for intelligence caches
+  /run/user/[0-9]*/clamfox/ rw,
+  /run/user/[0-9]*/clamfox/** rw,
+  /tmp/clamfox_* rw,
+  /tmp/clamfox_*/** rw,
+
+  # Allow reading files in common download/temp areas for scanning
+  /home/*/Downloads/** r,
+  /home/*/.clamfox_host.log w,
+  /tmp/** r,
+  /dev/shm/** rw,
+  /var/lib/clamav/** r,
+
+  # Networking for updates (MalwareBazaar/URLhaus/Yara)
+  network inet stream,
+  network inet6 stream,
+  
+  # Allow communication with clamav-daemon socket
+  /run/clamav/clamd.ctl rw,
+
+  # Deny writing to sensitive areas
+  deny /etc/** w,
+  deny /home/*/.ssh/** rw,
+  deny /home/*/.gnupg/** rw,
+}

@@ -1,0 +1,208 @@
+:root {
+    --primary: #00f2ff;
+    --primary-glow: rgba(0, 242, 255, 0.4);
+    --bg: #0a0e14;
+    --surface: #151c26;
+    --text: #e0e6ed;
+    --text-dim: #94a3b8;
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+}
+
+body {
+    width: 350px;
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Outfit', sans-serif;
+    overflow-x: hidden;
+}
+
+.container {
+    padding: 20px;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo-icon {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, var(--primary), #3b82f6);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 15px var(--primary-glow);
+}
+
+.logo-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.engine-status {
+    padding: 16px;
+    background-color: var(--surface);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    margin-bottom: 20px;
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 10px currentColor;
+}
+
+.dot.online {
+    background-color: var(--success);
+    color: var(--success);
+}
+
+.dot.offline {
+    background-color: var(--danger);
+    color: var(--danger);
+}
+
+.dot.warning {
+    background-color: var(--warning);
+    color: var(--warning);
+}
+
+.button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background-color: var(--primary);
+    color: #000;
+    font-family: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px var(--primary-glow);
+    filter: brightness(1.1);
+}
+
+button:disabled {
+    background-color: var(--surface);
+    color: var(--text-dim);
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.activity-log {
+    margin-top: 20px;
+}
+
+.section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+
+.log-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background-color: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    transition: background 0.2s;
+}
+
+.log-item:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.log-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.log-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.log-meta {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+
+.log-status {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.log-status.clean {
+    background-color: var(--success);
+}
+
+.log-status.infected {
+    background-color: var(--danger);
+}
+
+.log-status.error {
+    background-color: var(--warning);
+}
+
+.warning-box {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--danger);
+    padding: 12px;
+    border-radius: 8px;
+    color: var(--danger);
+    font-size: 0.85rem;
+    margin-bottom: 15px;
+    display: none;
+}

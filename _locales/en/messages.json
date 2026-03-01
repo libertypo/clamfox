@@ -1,0 +1,317 @@
+{
+    "extensionName": {
+        "message": "ClamFox"
+    },
+    "extensionDescription": {
+        "message": "Scans downloads and page content using your local ClamAV installation."
+    },
+    "popupTitle": {
+        "message": "ClamAV Shield"
+    },
+    "checking": {
+        "message": "Checking..."
+    },
+    "settings": {
+        "message": "Settings"
+    },
+    "scanTab": {
+        "message": "Scan Current Tab"
+    },
+    "missingTitle": {
+        "message": "ClamAV Not Found!"
+    },
+    "missingHint": {
+        "message": "Please install clamav via terminal."
+    },
+    "engineLabel": {
+        "message": "Scanner Engine"
+    },
+    "onAccessLabel": {
+        "message": "On-Access Shield"
+    },
+    "anonymityLabel": {
+        "message": "Anonymity"
+    },
+    "local": {
+        "message": "Local"
+    },
+    "dbLabel": {
+        "message": "Virus Database"
+    },
+    "urlLabel": {
+        "message": "URL Reputation"
+    },
+    "urlIntelLabel": {
+        "message": "URL Intelligence"
+    },
+    "localCache": {
+        "message": "Local Cache"
+    },
+    "recentActivity": {
+        "message": "Recent Activity"
+    },
+    "noScans": {
+        "message": "No scans recorded"
+    },
+    "blockedSites": {
+        "message": "Blocked Sites"
+    },
+    "export": {
+        "message": "Export"
+    },
+    "json": {
+        "message": "JSON"
+    },
+    "cleanHistory": {
+        "message": "Clean history"
+    },
+    "backToDashboard": {
+        "message": "Back to Dashboard"
+    },
+    "performanceSection": {
+        "message": "Scan Performance"
+    },
+    "frequencyLabel": {
+        "message": "Real-time Frequency"
+    },
+    "ramShieldLabel": {
+        "message": "Memory Shield"
+    },
+    "ramShieldHint": {
+        "message": "Scan exclusively in RAM (/dev/shm)"
+    },
+    "remindersLabel": {
+        "message": "Safe Browsing Reminders"
+    },
+    "remindersHint": {
+        "message": "Show periodic security best-practice tips"
+    },
+    "advancedSection": {
+        "message": "Advanced Security"
+    },
+    "puaLabel": {
+        "message": "Enhanced PUA Protection"
+    },
+    "puaHint": {
+        "message": "Detect adware & Potentially Unwanted Apps"
+    },
+    "mbLabel": {
+        "message": "Cloud Confirmation"
+    },
+    "mbHint": {
+        "message": "Verify suspicious files with MalwareBazaar"
+    },
+    "ghostLabel": {
+        "message": "Ghost Mode"
+    },
+    "ghostHint": {
+        "message": "Disable ALL external API lookups"
+    },
+    "promptShieldLabel": {
+        "message": "Prompt Injection Shield"
+    },
+    "promptShieldHint": {
+        "message": "Block hidden prompt injections & field hijacking"
+    },
+    "intelSyncSection": {
+        "message": "Intelligence Sync"
+    },
+    "autoSyncLabel": {
+        "message": "Automatic Updates"
+    },
+    "autoSyncHint": {
+        "message": "Sync YARA & URLhaus every 3 hours"
+    },
+    "localBlocklist": {
+        "message": "Local Blocklist"
+    },
+    "yaraLabel": {
+        "message": "YARA Signatures"
+    },
+    "yaraHint": {
+        "message": "Community Rules"
+    },
+    "autoBurnLabel": {
+        "message": "Auto-Burn Mode"
+    },
+    "autoBurnHint": {
+        "message": "Automatically neutralize zero-day threats globally"
+    },
+    "siteBlockedTitle": {
+        "message": "\ud83d\uded1 SITE BLOCKED"
+    },
+    "testPayloadMessage": {
+        "message": "ClamFox intercepted a simulated test payload."
+    },
+    "malwareSiteMessage": {
+        "message": "ClamFox intercepted a known malware site."
+    },
+    "authorizing": {
+        "message": "Authorizing..."
+    },
+    "authorizeChanges": {
+        "message": "Authorize Changes"
+    },
+    "connectionError": {
+        "message": "Error connecting to host."
+    },
+    "clipperShieldAlert": {
+        "message": "A malicious script tried to swap your crypto address!"
+    },
+    "credentialGuardTitle": {
+        "message": "\u26a0\ufe0f UNTRUSTED PORTAL"
+    },
+    "credentialGuardMessage": {
+        "message": "This site is not a verified brand. Use caution before entering passwords."
+    },
+    "appearanceSection": {
+        "message": "Appearance"
+    },
+    "threatDetected": {
+        "message": "\u26a0\ufe0f THREAT DETECTED"
+    },
+    "scanCompleteSafe": {
+        "message": "Scan Complete: SAFE"
+    },
+    "scanError": {
+        "message": "ClamFox: Scan Error"
+    },
+    "hostMissing": {
+        "message": "ClamAV Host Missing"
+    },
+    "hostMissingMessage": {
+        "message": "The native scanner host is not responding. Please ensure ClamAV and the host script are installed."
+    },
+    "scanLink": {
+        "message": "\ud83d\udee1\ufe0f ClamAV: Scan link target"
+    },
+    "scanImage": {
+        "message": "\ud83d\udee1\ufe0f\ufe0f ClamAV: Scan image"
+    },
+    "site": {
+        "message": "site"
+    },
+    "file": {
+        "message": "file"
+    },
+    "protectionEnabled": {
+        "message": "Protection Enabled"
+    },
+    "scannerDown": {
+        "message": "Scanner Down"
+    },
+    "monitoring": {
+        "message": "Monitoring..."
+    },
+    "active": {
+        "message": "Active"
+    },
+    "inactive": {
+        "message": "Inactive"
+    },
+    "updatedRecently": {
+        "message": "Updated recently"
+    },
+    "updateRequired": {
+        "message": "Update required"
+    },
+    "engineUpdated": {
+        "message": "Engine Updated"
+    },
+    "updateFailed": {
+        "message": "Update Failed"
+    },
+    "updating": {
+        "message": "Updating..."
+    },
+    "hostError": {
+        "message": "Host Error"
+    },
+    "intelligenceMissing": {
+        "message": "Intelligence Missing"
+    },
+    "engineMissing": {
+        "message": "Engine Missing"
+    },
+    "malwareRecent": {
+        "message": "Malware: Recent"
+    },
+    "phishRecent": {
+        "message": "Phish: Recent"
+    },
+    "installClamAV": {
+        "message": "To install ClamAV on your system:"
+    },
+    "safeBrowsing": {
+        "message": "Safe Browsing"
+    },
+    "safeBrowsingHint": {
+        "message": "Remember to avoid suspicious ads or fishy emails."
+    },
+    "promptInjectionRisk": {
+        "message": "Prompt Injection Risk"
+    },
+    "promptInjectionMessage": {
+        "message": "SECURITY: Page contains invisible instructions."
+    },
+    "inputHijackBlocked": {
+        "message": "Input Hijack Blocked"
+    },
+    "inputHijackMessage": {
+        "message": "Security: Background script tried to modify prompt."
+    },
+    "customPortalsSection": {
+        "message": "Secured Portals"
+    },
+    "customPortalsLabel": {
+        "message": "Custom Protection List"
+    },
+    "customPortalsHint": {
+        "message": "Add domains for strict isolation & phishing checks"
+    },
+    "addBtn": {
+        "message": "Add"
+    },
+    "noCustomPortals": {
+        "message": "No custom portals added"
+    },
+    "blockedLabel": {
+        "message": "Blocked"
+    },
+    "audit": {
+        "message": "Audit"
+    },
+    "suppressTrustedToastsLabel": {
+        "message": "Suspend toast alerts on trusted sites"
+    },
+    "suppressTrustedToastsHint": {
+        "message": "Stop showing notification toasts on official brands and whitelisted domains"
+    },
+    "clearHistory": {
+        "message": "Clear"
+    },
+    "confirmClearHistory": {
+        "message": "Are you sure you want to clear the history?"
+    },
+    "ertLabel": {
+        "message": "Hardware Trust Shield"
+    },
+    "hardwareLocked": {
+        "message": "Hardware Locked"
+    },
+    "softwareVault": {
+        "message": "Software Vault"
+    },
+    "unprotected": {
+        "message": "Unprotected"
+    },
+    "ertResealLabel": {
+        "message": "Refresh Hardware Trust"
+    },
+    "ertResealHint": {
+        "message": "Re-anchor security to current hardware state (TPM)"
+    },
+    "ertResealBtn": {
+        "message": "Refresh"
+    }
+}

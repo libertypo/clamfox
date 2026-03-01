@@ -1,0 +1,44 @@
+# Secrets & Local State
+host/config.json
+host/urldb.txt
+host/phishdb.txt
+host/whitelistdb.txt
+host/host_debug.log
+host/alert_log.txt
+host/tpm_debug.err
+host/decode_log.py
+*.log
+.clamfox_host.log
+
+# TPM / ERT Keyfiles & Signatures (machine-specific, generated at install time)
+host/vault_sealed_priv.bin
+host/vault_sealed_pub.bin
+host/verify.sig
+host/verify_digest
+host/verify_pub
+host/trust_db.json
+# Build Artifacts / Distribution Packages
+*.xpi
+*.zip
+build_full/
+build_amo/
+build_xpi_full/
+build_xpi_standalone/
+clamfox_amo_*/
+
+# Old snapshot directories
+clamfox_amo_0.0.4.5/
+
+# Test files
+eicar_test.txt
+da974eebe6414d4987d9*.xpi
+da974eebe6414d4987d9*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor artifacts
+.DS_Store
+*.swp

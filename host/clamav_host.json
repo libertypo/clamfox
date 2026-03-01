@@ -1,0 +1,9 @@
+{
+    "name": "clamav_host",
+    "description": "Native host for ClamAV Firefox extension",
+    "path": "/home/ovidio/firefox_clamav/host/clamav_engine.py",
+    "type": "stdio",
+    "allowed_extensions": [
+        "clamfox@ovidio.me"
+    ]
+}

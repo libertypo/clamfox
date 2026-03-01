@@ -1,0 +1,40 @@
+name: ClamFox Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger the workflow when a tag starting with 'v' is pushed (e.g., v0.0.5.7)
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for creating GitHub Releases
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip
+
+      - name: Build Packages (XPIs and ZIPs)
+        run: |
+          # Give script execution permission just in case
+          chmod +x package.sh
+          # Run the existing packaging script
+          bash package.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            clamfox_full_*.zip
+            clamfox_amo_source_*.zip
+            clamfox_full_*.xpi
+            clamfox_standalone_*.xpi
+          generate_release_notes: true
+          draft: false
+          prerelease: false

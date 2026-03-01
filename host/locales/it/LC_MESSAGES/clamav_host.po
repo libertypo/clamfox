@@ -1,0 +1,114 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: ClamFox 0.0.1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-21 17:25+0100\n"
+"PO-Revision-Date: 2026-02-21 17:30+0100\n"
+"Last-Translator: Ovidio <ovidio@example.com>\n"
+"Language-Team: Italian\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Preparing scan..."
+msgstr "Preparazione scansione..."
+
+msgid "Downloading content..."
+msgstr "Scaricamento dei contenuti..."
+
+msgid "Running ClamAV..."
+msgstr "Esecuzione di ClamAV..."
+
+msgid "Finalizing..."
+msgstr "Finalizzazione..."
+
+msgid "ClamAV not found"
+msgstr "ClamAV non trovato"
+
+msgid "Privacy Tunnel Failure (Tor/VPN unreachable)"
+msgstr "Fallimento del Tunnel Privacy (Tor/VPN non raggiungibili)"
+
+msgid "Scanning process interrupted: {error}"
+msgstr "Processo di scansione interrotto: {error}"
+
+msgid "Rate limit exceeded (Circuit Breaker active)"
+msgstr "Limite di velocità superato (Circuit Breaker attivo)"
+
+msgid "System processing failure"
+msgstr "Errore di elaborazione del sistema"
+
+msgid "MalwareBazaar Known Threat"
+msgstr "Minaccia nota MalwareBazaar"
+
+msgid "Clamscan failed"
+msgstr "Clamscan fallito"
+
+msgid "Homoglyph Suspect (Non-ASCII Domain)"
+msgstr "Sospetto Homoglyph (Dominio non-ASCII)"
+
+msgid "Potential Impersonation detected: {name}"
+msgstr "Potenziale impersonificazione rilevata: {name}"
+
+msgid "Typosquatting Suspected: Highly similar to {target}"
+msgstr "Sospetto Typosquatting: Altamente simile a {target}"
+
+msgid "Testing Payload (Safe Simulated Threat)"
+msgstr "Payload di Test (Minaccia simulata sicura)"
+
+msgid "URLhaus Malware Blocklist"
+msgstr "Blocklist Malware URLhaus"
+
+msgid "Phishing Intelligence (Mitchell Krog)"
+msgstr "Intelligence Phishing (Mitchell Krog)"
+
+msgid "ClamAV not installed"
+msgstr "ClamAV non installato"
+
+msgid "Invalid file path provided"
+msgstr "Percorso file non valido"
+
+msgid "File not found or inaccessible"
+msgstr "File non trovato o inaccessibile"
+
+msgid "Scan timeout after {timeout}s"
+msgstr "Timeout scansione dopo {timeout}s"
+
+msgid "Unknown Threat"
+msgstr "Minaccia Sconosciuta"
+
+msgid "Spoofed Extension: {mime} hidden as {ext}"
+msgstr "Estensione simulata: {mime} nascosto come {ext}"
+
+msgid "High-Threat Container: Hidden {suspects} discovered inside"
+msgstr "Container ad alta minaccia: {suspects} nascosti trovati all'interno"
+
+msgid "Malicious LNK: Points to system shell ({shell})"
+msgstr "LNK malevolo: Punta a una shell di sistema ({shell})"
+
+msgid "Clipboard Hijacking detected! A crypto address was swapped."
+msgstr "Dirottamento degli Appunti rilevato! Un indirizzo crypto è stato sostituito."
+
+msgid "Unauthorized: Security Handshake Failed"
+msgstr "Non autorizzato: Handshake di Sicurezza Fallito"
+
+msgid "YARA already current (Polite limit active)"
+msgstr "YARA già aggiornato (Limite di cortesia attivo)"
+
+msgid "YARA Signatures Synced & Sanitized"
+msgstr "Firme YARA Sincronizzate e Igienizzate"
+
+msgid "Sanitizer Error: {err}"
+msgstr "Errore Igienizzatore: {err}"
+
+msgid "Bridge Error: {err}"
+msgstr "Errore Bridge: {err}"
+
+msgid "Engine Re-Sealed & Shielded in Keyring"
+msgstr "Motore Ritenutato e Protetto nel Keyring"
+
+msgid "Engine Re-Sealed with Root Authority"
+msgstr "Motore Ritenutato con Autorità Root"
+
+msgid "Authorization Failed/Declined: {err}"
+msgstr "Autorizzazione Fallita/Rifiutata: {err}"

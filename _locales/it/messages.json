@@ -1,0 +1,390 @@
+{
+    "extensionName": {
+        "message": "ClamFox"
+    },
+    "extensionDescription": {
+        "message": "Scansiona download e contenuti delle pagine utilizzando l'installazione locale di ClamAV."
+    },
+    "popupTitle": {
+        "message": "Protezione ClamAV"
+    },
+    "checking": {
+        "message": "Verifica..."
+    },
+    "settings": {
+        "message": "Impostazioni"
+    },
+    "scanTab": {
+        "message": "Scansiona Scheda Corrente"
+    },
+    "missingTitle": {
+        "message": "ClamAV non trovato!"
+    },
+    "missingHint": {
+        "message": "Per favore, installa clamav tramite terminale."
+    },
+    "engineLabel": {
+        "message": "Motore di Scansione"
+    },
+    "onAccessLabel": {
+        "message": "Protezione in Tempo Reale"
+    },
+    "anonymityLabel": {
+        "message": "Anonimato"
+    },
+    "local": {
+        "message": "Locale"
+    },
+    "dbLabel": {
+        "message": "Database Virus"
+    },
+    "urlLabel": {
+        "message": "Reputazione URL"
+    },
+    "urlIntelLabel": {
+        "message": "Intelligence URL"
+    },
+    "localCache": {
+        "message": "Cache Locale"
+    },
+    "recentActivity": {
+        "message": "Attività Recente"
+    },
+    "noScans": {
+        "message": "Nessuna scansione registrata"
+    },
+    "blockedSites": {
+        "message": "Siti Bloccati"
+    },
+    "export": {
+        "message": "Esporta"
+    },
+    "json": {
+        "message": "JSON"
+    },
+    "cleanHistory": {
+        "message": "Cronologia pulita"
+    },
+    "backToDashboard": {
+        "message": "Torna alla Dashboard"
+    },
+    "performanceSection": {
+        "message": "Prestazioni Scansione"
+    },
+    "frequencyLabel": {
+        "message": "Frequenza in Tempo Reale"
+    },
+    "frequencyHint": {
+        "message": "Scansiona ogni $count$ MB",
+        "placeholders": {
+            "count": {
+                "content": "$1"
+            }
+        }
+    },
+    "ramShieldLabel": {
+        "message": "Protezione Memoria"
+    },
+    "ramShieldHint": {
+        "message": "Scansiona esclusivamente in RAM (/dev/shm)"
+    },
+    "remindersLabel": {
+        "message": "Promemoria Navigazione Sicura"
+    },
+    "remindersHint": {
+        "message": "Mostra periodicamente consigli sulla sicurezza"
+    },
+    "advancedSection": {
+        "message": "Sicurezza Avanzata"
+    },
+    "puaLabel": {
+        "message": "Protezione PUA Avanzata"
+    },
+    "puaHint": {
+        "message": "Rileva adware e app potenzialmente indesiderate"
+    },
+    "mbLabel": {
+        "message": "Conferma Cloud"
+    },
+    "mbHint": {
+        "message": "Verifica i file sospetti con MalwareBazaar"
+    },
+    "ghostLabel": {
+        "message": "Modalità Fantasma"
+    },
+    "ghostHint": {
+        "message": "Disabilita TUTTE le ricerche API esterne"
+    },
+    "promptShieldLabel": {
+        "message": "Protezione Prompt Injection"
+    },
+    "promptShieldHint": {
+        "message": "Blocca prompt injection nascosti e dirottamenti input"
+    },
+    "intelSyncSection": {
+        "message": "Sincronizzazione Intelligence"
+    },
+    "autoSyncLabel": {
+        "message": "Aggiornamenti Automatici"
+    },
+    "autoSyncHint": {
+        "message": "Sincronizza YARA e URLhaus ogni 3 ore"
+    },
+    "localBlocklist": {
+        "message": "Blocklist Locale"
+    },
+    "yaraLabel": {
+        "message": "Firme YARA"
+    },
+    "yaraHint": {
+        "message": "Regole della Community"
+    },
+    "autoBurnLabel": {
+        "message": "Modalità Auto-Burn"
+    },
+    "autoBurnHint": {
+        "message": "Neutralizza automaticamente le minacce zero-day a livello globale"
+    },
+    "siteBlockedTitle": {
+        "message": "🛑 SITO BLOCCATO"
+    },
+    "testPayloadMessage": {
+        "message": "ClamFox ha intercettato un payload di test simulato."
+    },
+    "malwareSiteMessage": {
+        "message": "ClamFox ha intercettato un sito di malware noto."
+    },
+    "authorizing": {
+        "message": "Autorizzazione..."
+    },
+    "authorizeChanges": {
+        "message": "Autorizza Modifiche"
+    },
+    "authorizationFailed": {
+        "message": "Autorizzazione fallita: $err$",
+        "placeholders": {
+            "err": {
+                "content": "$1"
+            }
+        }
+    },
+    "connectionError": {
+        "message": "Errore di connessione all'host."
+    },
+    "clipperShieldAlert": {
+        "message": "Uno script malevolo ha cercato di sostituire il tuo indirizzo crypto!"
+    },
+    "credentialGuardTitle": {
+        "message": "⚠️ PORTALE NON VERIFICATO"
+    },
+    "credentialGuardMessage": {
+        "message": "Questo sito non è un marchio verificato. Fai attenzione prima di inserire password."
+    },
+    "appearanceSection": {
+        "message": "Aspetto"
+    },
+    "threatDetected": {
+        "message": "⚠️ MINACCIA RILEVATA"
+    },
+    "threatMessage": {
+        "message": "ClamFox ha trovato \"$virus$\" su $displayName$. L'accesso è stato bloccato per la tua protezione.",
+        "placeholders": {
+            "virus": {
+                "content": "$1"
+            },
+            "displayName": {
+                "content": "$2"
+            }
+        }
+    },
+    "scanCompleteSafe": {
+        "message": "Scansione Completata: SICURO"
+    },
+    "safeMessage": {
+        "message": "Nessuna minaccia trovata su $displayName$. Questo $typeLabel$ è sicuro da accedere.",
+        "placeholders": {
+            "displayName": {
+                "content": "$1"
+            },
+            "typeLabel": {
+                "content": "$2"
+            }
+        }
+    },
+    "scanError": {
+        "message": "ClamFox: Errore Scansione"
+    },
+    "errorMessage": {
+        "message": "Il modulo di scansione ha riscontrato un problema: $err$",
+        "placeholders": {
+            "err": {
+                "content": "$1"
+            }
+        }
+    },
+    "hostMissing": {
+        "message": "Modulo ClamAV Mancante"
+    },
+    "hostMissingMessage": {
+        "message": "Il modulo di scansione non risponde. Assicurati che ClamAV e lo script host siano installati."
+    },
+    "scanLink": {
+        "message": "🛡️ ClamAV: Scansiona link"
+    },
+    "scanImage": {
+        "message": "🛡️️ ClamAV: Scansiona immagine"
+    },
+    "site": {
+        "message": "sito"
+    },
+    "file": {
+        "message": "file"
+    },
+    "protectionEnabled": {
+        "message": "Protezione Attiva"
+    },
+    "scannerDown": {
+        "message": "Scanner non attivo"
+    },
+    "monitoring": {
+        "message": "Monitoraggio..."
+    },
+    "active": {
+        "message": "Attivo"
+    },
+    "inactive": {
+        "message": "Inattivo"
+    },
+    "updatedRecently": {
+        "message": "Aggiornato di recente"
+    },
+    "updateRequired": {
+        "message": "Aggiornamento richiesto"
+    },
+    "scanningWithPercent": {
+        "message": "Scansione in corso... $percent$%",
+        "placeholders": {
+            "percent": {
+                "content": "$1"
+            }
+        }
+    },
+    "engineUpdated": {
+        "message": "Motore Aggiornato"
+    },
+    "updateFailed": {
+        "message": "Aggiornamento Fallito"
+    },
+    "updating": {
+        "message": "Aggiornamento..."
+    },
+    "hostError": {
+        "message": "Errore Host"
+    },
+    "intelligenceMissing": {
+        "message": "Intelligence Mancante"
+    },
+    "engineMissing": {
+        "message": "Motore Mancante"
+    },
+    "updatedHAgo": {
+        "message": "Aggiornato $hours$ ore fa",
+        "placeholders": {
+            "hours": {
+                "content": "$1"
+            }
+        }
+    },
+    "updatedDAgo": {
+        "message": "Aggiornato $days$ giorni fa",
+        "placeholders": {
+            "days": {
+                "content": "$1"
+            }
+        }
+    },
+    "malwareRecent": {
+        "message": "Malware: Recente"
+    },
+    "malwareHAgo": {
+        "message": "Malware: $hours$ ore fa",
+        "placeholders": {
+            "hours": {
+                "content": "$1"
+            }
+        }
+    },
+    "phishRecent": {
+        "message": "Phish: Recente"
+    },
+    "phishHAgo": {
+        "message": "Phish: $hours$ ore fa",
+        "placeholders": {
+            "hours": {
+                "content": "$1"
+            }
+        }
+    },
+    "installClamAV": {
+        "message": "Per installare ClamAV sul tuo sistema:"
+    },
+    "optimizeClamAV": {
+        "message": "Ottimizzazione per $engine$:",
+        "placeholders": {
+            "engine": {
+                "content": "$1"
+            }
+        }
+    },
+    "safeBrowsing": {
+        "message": "Navigazione Sicura"
+    },
+    "safeBrowsingHint": {
+        "message": "Ricorda di evitare annunci sospetti o email di phishing."
+    },
+    "promptInjectionRisk": {
+        "message": "Rischio Prompt Injection"
+    },
+    "promptInjectionMessage": {
+        "message": "SICUREZZA: La pagina contiene istruzioni invisibili."
+    },
+    "inputHijackBlocked": {
+        "message": "Dirottamento Input Bloccato"
+    },
+    "inputHijackMessage": {
+        "message": "Sicurezza: Uno script in background ha cercato di modificare il prompt."
+    },
+    "customPortalsSection": {
+        "message": "Portali Protetti"
+    },
+    "customPortalsLabel": {
+        "message": "Lista Protezione Personalizzata"
+    },
+    "customPortalsHint": {
+        "message": "Aggiungi domini per isolamento stretto e controlli phishing"
+    },
+    "addBtn": {
+        "message": "Aggiungi"
+    },
+    "noCustomPortals": {
+        "message": "Nessun portale personalizzato aggiunto"
+    },
+    "blockedLabel": {
+        "message": "Bloccato"
+    },
+    "audit": {
+        "message": "Analisi"
+    },
+    "suppressTrustedToastsLabel": {
+        "message": "Sospendi avvisi sui siti attendibili"
+    },
+    "suppressTrustedToastsHint": {
+        "message": "Smetti di mostrare notifiche toast sui marchi ufficiali e sui domini in whitelist"
+    },
+    "clearHistory": {
+        "message": "Pulisci"
+    },
+    "confirmClearHistory": {
+        "message": "Sei sicuro di voler cancellare la cronologia?"
+    }
+}
