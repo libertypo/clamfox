@@ -26,6 +26,21 @@ function isSiteTrusted() {
     return isHVT || isWhitelisted || isUserWhitelisted;
 }
 
+// Utility: Parse color and check alpha transparency numerically
+function isActuallyTransparent(style) {
+    const bg = style.backgroundColor;
+    const opacity = parseFloat(style.opacity);
+
+    if (opacity < 0.1) return true;
+    if (bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') return true;
+
+    // Handle rgba(r, g, b, a) or hsla(h, s, l, a)
+    const match = bg.match(/rgba?\(.*,\s*([\d.]+)\)/) || bg.match(/hsla?\(.*,\s*([\d.]+)\)/);
+    if (match && parseFloat(match[1]) < 0.1) return true;
+
+    return false;
+}
+
 // Initialize container
 function getContainer() {
     let container = document.getElementById('sys-alert-layer');
@@ -658,26 +673,35 @@ async function deployDOMAnomalyShield(hvtData) {
 
         const target = e.target;
         const style = window.getComputedStyle(target);
-        const opacity = parseFloat(style.opacity);
-        const isTransparent = opacity < 0.2 || style.backgroundColor === 'rgba(0, 0, 0, 0)' || style.backgroundColor === 'transparent';
 
         // Check if this specific element was already pre-flagged as suspect
         let isConfirmedThreat = SUSPECT_OVERLAYS.has(target);
 
         // SURGICAL ANALYSIS: Check stack depth at click point if top element is ghostly
-        if (!isConfirmedThreat && isTransparent) {
+        if (!isConfirmedThreat && isActuallyTransparent(style)) {
             const elements = document.elementsFromPoint(e.clientX, e.clientY);
             if (elements.length > 1) {
                 // Find what's directly beneath our ghostly target
                 const secondElement = elements[1];
                 if (secondElement) {
+                    const secondStyle = window.getComputedStyle(secondElement);
                     const tag = secondElement.tagName.toLowerCase();
-                    const isHighValueTarget = ['a', 'button', 'input', 'select', 'textarea'].includes(tag);
 
-                    // If we have a ghostly layer on top of a solid UI interaction target, it's an Interception Anomaly
-                    if (isHighValueTarget) {
+                    // Broadened High Value Target Detection
+                    const isSemanticHVT = ['a', 'button', 'input', 'select', 'textarea'].includes(tag);
+                    const isCustomHVT = secondElement.getAttribute('onclick') ||
+                        secondElement.getAttribute('role') === 'button' ||
+                        secondStyle.cursor === 'pointer';
+
+                    const isInteractive = isSemanticHVT || isCustomHVT;
+
+                    // Verify stacking: Interceptor must be above target
+                    const targetZ = parseInt(secondStyle.zIndex) || 0;
+                    const interceptorZ = parseInt(style.zIndex) || 0;
+
+                    if (isInteractive && interceptorZ >= targetZ) {
                         isConfirmedThreat = true;
-                        console.warn(`🛡️ SURGICAL SHIELD: Intercepted stealthy overlay covering <${tag}>!`);
+                        console.warn(`🛡️ SURGICAL SHIELD: Intercepted stealthy overlay covering interactive <${tag}>!`);
                     }
                 }
             }
@@ -736,21 +760,20 @@ async function deployDOMAnomalyShield(hvtData) {
         const bg = style.backgroundColor;
         const pointerEvents = style.pointerEvents;
 
-        const isTransparent = opacity < 0.1 || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent';
         const takesClicks = pointerEvents !== 'none';
 
-        if (isTransparent && takesClicks) {
+        if (isActuallyTransparent(style) && takesClicks) {
             const rect = node.getBoundingClientRect();
             const vWidth = window.innerWidth;
             const vHeight = window.innerHeight;
 
             if (vWidth === 0 || vHeight === 0) return;
 
-            // Coverage Threshold: 45% of viewport (Aggressive reduction of false positives)
+            // Coverage Threshold: 10% of viewport for pre-flagging (More sensitive)
             const area = rect.width * rect.height;
-            const isMassive = area > (vWidth * vHeight * 0.45);
+            const isSignificant = area > (vWidth * vHeight * 0.10);
 
-            if (isMassive) {
+            if (isSignificant) {
                 if (isWhitelistedDynamic() || window.__CLAMFOX_BYPASS) return;
 
                 console.log("🛡️ SUSPECT OVERLAY DETECTED: Monitoring for click interception.");
