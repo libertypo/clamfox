@@ -1,8 +1,8 @@
-# ClamFox (v0.0.5.7)
+# ClamFox
 Firefox extension to filter traffic and downloads
 ## 🛡️ Hybrid Architecture
 ClamFox now supports a **Dual-Mode** deployment:
-1. **Standalone (AMO Mode)**: Works purely inside Firefox. Provides Visual Anti-Phishing, Prompt Injection Shields, Honeypots, and Privacy Hardening without any local installation.
+1. **Standalone (AMO Mode)**: Works purely inside Firefox. Provides Visual Anti-Phishing, Prompt Injection Shields, Honeypots, and Privacy Hardening without any local installation.(not thorougly tested)
 2. **Total Defense (Core Mode)**: When the **ClamFox Native Bridge** is present, the extension unlocks OS-level ClamAV scanning, atomic file locking, and system-wide clipboard protection.
 
 ## 🔥 Key Technicals
@@ -25,7 +25,7 @@ To unlock real-time binary scanning and EDR features:
 3. Run `./install.sh`.
 
 ## 📦 Requirements
-- **OS**: Linux (standard, Snap, and Flatpak).
+- **OS**: Linux (standard, Snap, and Flatpak. Snap and Flatpak not thoroughly tested).
 - **Engine**: ClamAV (`clamd` supported).
 - **Native**: Python 3.8+.
 - **Browser**: Firefox 142+.
