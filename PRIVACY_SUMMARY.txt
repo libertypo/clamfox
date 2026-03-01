@@ -2,12 +2,15 @@
 CLAMFOX - PRIVACY ARCHITECTURE SUMMARY
 ==================================================
 
-This extension was designed with a "Privacy-First" security model, 
-aiming to provide enterprise-grade protection without the massive 
-data collection typical of commercial Antivirus software.
+This extension was designed with a "Privacy-First" smodel, 
+aiming to provide protection without the massive 
+data collection typical of commercial software.
+All due dilligence was exerted to insure no private data
+is neither collected nor transmited outside the local 
+context of execution
 
 --------------------------------------------------
-✅ THE PRIVACY PROS (The Wins)
+                THE PRIVACY
 --------------------------------------------------
 
 1. 100% LOCAL FILE SCANNING (ClamAV)
@@ -43,7 +46,7 @@ data collection typical of commercial Antivirus software.
      visible in the project code (Python/JS).
 
 --------------------------------------------------
-⚠️ THE PRIVACY CONS (The Trade-offs)
+                 The Trade-offs
 --------------------------------------------------
 
 1. HASH LEAKS (MalwareBazaar)
@@ -64,11 +67,3 @@ data collection typical of commercial Antivirus software.
    - This gives the Python script access to your local files 
      (required to scan them).
 
---------------------------------------------------
-📊 FINAL VERDICT: "REPUTABLE GRADE"
---------------------------------------------------
-Compared to Chrome's "Safe Browsing" or Windows Defender, 
-ClamFox is significantly more private. While it does 
-"ping" security communities for intelligence, it never 
-shares your identity or your actual browsing habits.
-==================================================
