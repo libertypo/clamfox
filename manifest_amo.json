@@ -66,5 +66,8 @@
             "128": "icons/icon128.png"
         }
     },
-    "web_accessible_resources": []
+    "web_accessible_resources": [],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'none';"
+    }
 }

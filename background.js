@@ -1,3 +1,7 @@
+// Security: Set to false in production to prevent internal state leaking to DevTools
+const DEBUG = false;
+const dbg = (...args) => { if (DEBUG) console.log(...args); };
+
 const NATIVE_HOST_NAME = "clamav_host";
 let HOST_AVAILABLE = false; // Detected at runtime
 
@@ -10,7 +14,7 @@ async function initWhitelist() {
     const storage = await browser.storage.local.get("userWhitelist");
     if (storage.userWhitelist && Array.isArray(storage.userWhitelist)) {
         storage.userWhitelist.forEach(domain => USER_WHITELIST.add(domain));
-        console.log(`🛡️ USER WHITELIST: Loaded ${USER_WHITELIST.size} domains.`);
+        dbg(`🛡️ USER WHITELIST: Loaded ${USER_WHITELIST.size} domains.`);
     }
 }
 
@@ -58,7 +62,7 @@ async function initBackground() {
 
     // Perform initial handshake to sync secrets from host
     await getSecret(true);
-    console.log("🛡️ SECURITY CORE: Startup handshake complete.");
+    dbg("🛡️ SECURITY CORE: Startup handshake complete.");
 }
 
 initBackground();
@@ -67,7 +71,7 @@ initBackground();
 const TAB_INCIDENTS = new Map();
 
 function escalateTabProtection(tabId) {
-    console.log(`🛡️ EDR ESCALATION: Hardening security for suspect tab ${tabId}`);
+    dbg(`🛡️ EDR ESCALATION: Hardening security for suspect tab ${tabId}`);
     // We could use scripting.registerContentScripts or dynamic CSP injection here.
     // For now, we flag it in storage so content scripts can react.
     browser.storage.local.set({ [`tab_escalated_${tabId}`]: true });
@@ -77,12 +81,12 @@ function escalateTabProtection(tabId) {
 browser.tabs.onRemoved.addListener((tabId) => {
     if (TAB_INCIDENTS.has(tabId)) {
         TAB_INCIDENTS.delete(tabId);
-        console.log(`🧹 EDR CLEANUP: Purged telemetry for closed tab ${tabId}`);
+        dbg(`🧹 EDR CLEANUP: Purged telemetry for closed tab ${tabId}`);
     }
 
     if (CERT_CACHE.has(tabId)) {
         CERT_CACHE.delete(tabId);
-        console.log(`🧹 CACHE CLEANUP: Purged certificate info for closed tab ${tabId}`);
+        dbg(`🧹 CACHE CLEANUP: Purged certificate info for closed tab ${tabId}`);
     }
 
     if (ACTIVE_CHALLENGES.has(tabId)) {
@@ -137,7 +141,7 @@ browser.alarms.onAlarm.addListener((alarm) => {
         }
 
         if (cleanedTabs > 0 || cleanedDownloads > 0 || cleanedChallenges > 0 || cleanedBeacons > 0) {
-            console.log(`🧹 GARBAGE COLLECTION: Purged ${cleanedTabs} tabs, ${cleanedDownloads} downloads, ${cleanedChallenges} challenges, and ${cleanedBeacons} beacons.`);
+            dbg(`🧹 GARBAGE COLLECTION: Purged ${cleanedTabs} tabs, ${cleanedDownloads} downloads, ${cleanedChallenges} challenges, and ${cleanedBeacons} beacons.`);
         }
     }
 });
@@ -149,7 +153,7 @@ browser.downloads.onCreated.addListener(async (item) => {
     try {
         const url = new URL(item.url);
         if (isWhitelisted(url.hostname)) {
-            console.log("🛡️ USER OVERRIDE: Allowing download from whitelisted domain:", url.hostname);
+            dbg("🛡️ USER OVERRIDE: Allowing download from whitelisted domain:", url.hostname);
             return;
         }
     } catch (e) { }
@@ -194,7 +198,7 @@ browser.downloads.onCreated.addListener(async (item) => {
 browser.downloads.onChanged.addListener(async (delta) => {
     // 1. Handle completed downloads
     if (delta.state && delta.state.current === "complete") {
-        console.log("Download complete event received for ID:", delta.id);
+        dbg("Download complete event received for ID:", delta.id);
         const items = await browser.downloads.search({ id: delta.id });
         if (items.length > 0) {
             const item = items[0];
@@ -207,7 +211,7 @@ browser.downloads.onChanged.addListener(async (delta) => {
                     target: item.filename,
                     secret: secret
                 });
-                console.log("🔒 FILE SEALED: Access restricted during analysis.");
+                dbg("🔒 FILE SEALED: Access restricted during analysis.");
             } catch (e) { }
 
             // Ensure our engine knows it's a quarantined target if routing was successful
@@ -237,7 +241,7 @@ browser.downloads.onChanged.addListener(async (delta) => {
             const intervalBytes = settings.scanFrequencyMB * 1024 * 1024;
             // Duplicate SCAN_INTERVAL_BYTES removed (using global constant)
             if ((currentBytes - info.lastScanBytes) > intervalBytes) {
-                console.log(`Progressive scan for ${info.filename} at ${currentBytes} bytes (Interval: ${settings.scanFrequencyMB}MB)`);
+                dbg(`Progressive scan for ${info.filename} at ${currentBytes} bytes (Interval: ${settings.scanFrequencyMB}MB)`);
                 info.lastScanBytes = currentBytes;
                 performScan(info.filename, "file_partial", id);
             }
@@ -266,7 +270,7 @@ async function getSecret(forceRefresh = false) {
     }
 
     try {
-        console.log("🔒 Security Handshake starting...");
+        dbg("🔒 Security Handshake starting...");
         // Send a bare check to get the current secret
         const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check" }, 5000);
 
@@ -290,7 +294,7 @@ async function getSecret(forceRefresh = false) {
             await browser.storage.local.set(update);
             // Clear badge if previously tampered
             browser.action.setBadgeText({ text: "" });
-            console.log("🔒 Security Handshake successful (Host + Honeypot). Core features enabled.");
+            dbg("🔒 Security Handshake successful (Host + Honeypot). Core features enabled.");
             return response.secret;
         }
     } catch (e) {
@@ -330,7 +334,7 @@ browser.webRequest.onBeforeRequest.addListener(
             // Option 3: Persistent Challenge Mode
             if (details.tabId && details.tabId !== -1) {
                 ACTIVE_CHALLENGES.set(details.tabId, Date.now() + 60000); // 60s quarantine
-                console.log(`🛡️ CLOUDFLARE SHIELD: Tab ${details.tabId} entered Challenge Mode (60s).`);
+                dbg(`🛡️ CLOUDFLARE SHIELD: Tab ${details.tabId} entered Challenge Mode (60s).`);
             }
             // Remember the hostname for a short window so the next navigation (the real site) is allowed
             if (url && !url.hostname.includes("cloudflare")) {
@@ -656,7 +660,7 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
 }
 
 async function performScan(target, type, downloadId = null, tabId = null) {
-    console.log(`Initiating ${type} scan for: ${target}`);
+    dbg(`Initiating ${type} scan for: ${target}`);
 
     const progressUpdate = (data) => {
         if (data.percent !== undefined) {
@@ -671,7 +675,7 @@ async function performScan(target, type, downloadId = null, tabId = null) {
     };
 
     if (!HOST_AVAILABLE && type !== "url") {
-        console.log(`Bypassing ${type} scan (Host Offline): ${target}`);
+        dbg(`Bypassing ${type} scan (Host Offline): ${target}`);
         progressUpdate({ status: "complete", result: "clean", msg: "Bypassed (Browser-Only Mode)" });
         return;
     }
@@ -715,7 +719,7 @@ async function performScan(target, type, downloadId = null, tabId = null) {
             }
 
             // Final Result Handling
-            console.log("Scan result:", response);
+            dbg("Scan result:", response);
             port.disconnect();
 
             if (tabId) {
@@ -756,7 +760,7 @@ async function performScan(target, type, downloadId = null, tabId = null) {
 
                 // AUTO-BURN Logic: Automatically neutralizing zero-days globally if enabled
                 if (settings.autoBurnEnabled && (response.status === "infected" || (response.mb && response.mb.status === "mb_infected"))) {
-                    console.log("🔥 AUTO-BURN: High-confidence threat detected. Initiating community neutralization...");
+                    dbg("🔥 AUTO-BURN: High-confidence threat detected. Initiating community neutralization...");
                     browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
                         action: "report_threat",
                         target: target,
@@ -855,7 +859,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
-    console.log("Internal message received:", message);
+    dbg("Internal message received:", message);
 
     const handleMessage = async () => {
         // Skip internal pages
@@ -870,13 +874,13 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return { status: "initiated" };
         } else if (message.action === "proxy_check") {
             try {
-                console.log("Diagnostic: Starting proxy_check...");
+                dbg("Diagnostic: Starting proxy_check...");
                 const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: secret });
-                console.log("Diagnostic: proxy_check success:", res);
+                dbg("Diagnostic: proxy_check success:", res);
 
                 // Keep secret in sync: If host returns a new secret during check, store it
                 if (res.secret && res.secret !== "****") {
-                    console.log("🔄 Secret refresh detected during check.");
+                    dbg("🔄 Secret refresh detected during check.");
                     SESSION_HOST_SECRET = res.secret;
                 }
 
@@ -887,7 +891,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 try {
                     const newSecret = await getSecret(true);
                     const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: newSecret });
-                    console.log("Diagnostic: proxy_check success after refresh:", res);
+                    dbg("Diagnostic: proxy_check success after refresh:", res);
                     return res;
                 } catch (err) {
                     console.error("Diagnostic: proxy_check CRITICAL FAILURE:", err);
@@ -899,7 +903,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else if (message.action === "proxy_force_engine_update") {
             return sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "force_db_update", secret: secret }, 15000);
         } else if (message.action === "proxy_reconnect") {
-            console.log("🔄 Manual Reconnection requested.");
+            dbg("🔄 Manual Reconnection requested.");
             SESSION_HOST_SECRET = null;
             return getSecret(true).then(newSecret => {
                 if (newSecret) return { status: "ok" };
@@ -1072,7 +1076,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return sender.tab ? sender.tab.id : null;
         } else if (message.action === "bypass_domain") {
             if (message.domain) {
-                console.log(`🛡️ USER OVERRIDE: Persistently whitelisting ${message.domain}`);
+                dbg(`🛡️ USER OVERRIDE: Persistently whitelisting ${message.domain}`);
                 USER_WHITELIST.add(message.domain);
 
                 // Persist to storage
@@ -1165,7 +1169,7 @@ browser.runtime.onInstalled.addListener(() => {
         title: browser.i18n.getMessage("scanImage"),
         contexts: ["image"]
     });
-    console.log("ClamAV Context Menus Registered");
+    dbg("ClamAV Context Menus Registered");
 
     // Initialize 6-hour Intelligence Sync Alarm
     setupIntelligenceAlarm();
@@ -1177,7 +1181,7 @@ browser.runtime.onInstalled.addListener(() => {
 async function setupIntelligenceAlarm() {
     const settings = await browser.storage.local.get({ autoSyncEnabled: true });
     if (settings.autoSyncEnabled) {
-        console.log("⏰ Setting up 3-hour Intelligence Sync Alarm...");
+        dbg("⏰ Setting up 3-hour Intelligence Sync Alarm...");
         browser.alarms.create("intelligence-sync", {
             periodInMinutes: 180 // 3 hours
         });
@@ -1189,14 +1193,14 @@ async function setupIntelligenceAlarm() {
 // Handle Background Alarms
 browser.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === "intelligence-sync") {
-        console.log("🚀 Executing Scheduled Intelligence Sync...");
+        dbg("🚀 Executing Scheduled Intelligence Sync...");
         try {
             const secret = await getSecret();
             // Sync URLHaus
             await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, { action: "update_urldb", secret: secret });
             // Sync YARA
             await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, { action: "update_yara", secret: secret });
-            console.log("✅ Scheduled Sync Completed.");
+            dbg("✅ Scheduled Sync Completed.");
         } catch (e) {
             console.error("❌ Scheduled Sync Failed:", e);
         }
@@ -1252,7 +1256,7 @@ async function initPrivacyShield() {
         await browser.privacy.network.webRTCIPHandlingPolicy.set({
             value: "default_public_interface_only"
         });
-        console.log("🛡️ PRIVACY SHIELD: WebRTC IP Leak Protection active.");
+        dbg("🛡️ PRIVACY SHIELD: WebRTC IP Leak Protection active.");
     } catch (e) {
         console.error("Failed to set WebRTC policy:", e);
     }
@@ -1289,7 +1293,7 @@ async function updateSecurePortals() {
             if (intel.status === "ok") {
                 if (intel.hvts) currentHVTs = intel.hvts;
                 if (intel.whitelist) dynamicWhitelist = intel.whitelist;
-                console.log("🛡️ INTEL SYNC: Dynamic research-based whitelist (Top 5k) loaded from host.");
+                dbg("🛡️ INTEL SYNC: Dynamic research-based whitelist (Top 5k) loaded from host.");
             }
         } catch (e) {
             console.warn("Dynamic Intel sync failed. Using local HVT fallbacks.");
@@ -1329,7 +1333,7 @@ browser.webRequest.onHeadersReceived.addListener(
                     url.search.includes("state=") || url.search.includes("code=");
 
                 if (isAuthFlow || hasExistingSecurity) {
-                    console.log(`🛡️ PROACTIVE BYPASS: Not injecting security headers into ${url.hostname} flow.`);
+                    dbg(`🛡️ PROACTIVE BYPASS: Not injecting security headers into ${url.hostname} flow.`);
                     return {};
                 }
 
@@ -1354,19 +1358,19 @@ initPrivacyShield();
 // Single message listener handles everything.
 
 browser.menus.onClicked.addListener((info, tab) => {
-    console.log("Context Menu Clicked:", info.menuItemId);
+    dbg("Context Menu Clicked:", info.menuItemId);
     const tabId = tab ? tab.id : null;
 
     if (info.menuItemId === "scan-link") {
         if (info.linkUrl) {
-            console.log("Scanning link:", info.linkUrl);
+            dbg("Scanning link:", info.linkUrl);
             performScan(info.linkUrl, "url", null, tabId);
         } else {
             console.error("No link URL found in context menu info");
         }
     } else if (info.menuItemId === "scan-image") {
         if (info.srcUrl) {
-            console.log("Scanning image:", info.srcUrl);
+            dbg("Scanning image:", info.srcUrl);
             performScan(info.srcUrl, "url", null, tabId);
         } else {
             console.error("No source URL found in context menu info");

@@ -16,8 +16,12 @@ mkdir -p build_full
 cp -r background.js content.js content.css design_tokens.css manifest.json popup icons _locales host data README.md PRIVACY_SUMMARY.txt build_full/
 # Privacy: Remove local state/secrets from host before packaging
 rm -f build_full/host/config.json
-rm -f build_full/host/host_debug.log
-rm -f build_full/host/urldb.txt*
+rm -f build_full/host/host_debug.log build_full/host/alert_log.txt build_full/host/tpm_debug.err
+rm -f build_full/host/urldb.txt* build_full/host/trust_db.json
+rm -f build_full/host/vault_sealed_priv.bin build_full/host/vault_sealed_pub.bin
+rm -f build_full/host/verify.sig build_full/host/verify_digest build_full/host/verify_pub
+rm -f build_full/host/decode_log.py
+rm -rf build_full/host/__pycache__
 cd build_full && zip -r "../$FULL_PACKAGE" ./* && cd ..
 
 # 2. Create Standalone XPI (AMO Submission Ready - No Native Host)
@@ -31,14 +35,24 @@ cd build_xpi_standalone && zip -r "../$XPI_STANDALONE" ./* && cd ..
 mkdir -p build_xpi_full
 cp -r background.js content.js content.css design_tokens.css manifest.json popup icons _locales host data build_xpi_full/
 rm -f build_xpi_full/host/config.json
-rm -f build_xpi_full/host/host_debug.log
-rm -f build_xpi_full/host/urldb.txt*
+rm -f build_xpi_full/host/host_debug.log build_xpi_full/host/alert_log.txt build_xpi_full/host/tpm_debug.err
+rm -f build_xpi_full/host/urldb.txt* build_xpi_full/host/trust_db.json
+rm -f build_xpi_full/host/vault_sealed_priv.bin build_xpi_full/host/vault_sealed_pub.bin
+rm -f build_xpi_full/host/verify.sig build_xpi_full/host/verify_digest build_xpi_full/host/verify_pub
+rm -f build_xpi_full/host/decode_log.py
+rm -rf build_xpi_full/host/__pycache__
 mkdir -p build_xpi_full/META-INF
 cd build_xpi_full && zip -r "../$XPI_FULL" ./* && cd ..
 
 # 4. Create Source Zip for AMO (Required for review)
 mkdir -p build_amo
 cp -r background.js content.js content.css design_tokens.css manifest.json manifest_amo.json popup icons _locales host data README.md PRIVACY_SUMMARY.txt package.sh build_amo/
+rm -f build_amo/host/config.json build_amo/host/host_debug.log build_amo/host/alert_log.txt build_amo/host/tpm_debug.err
+rm -f build_amo/host/urldb.txt* build_amo/host/trust_db.json
+rm -f build_amo/host/vault_sealed_priv.bin build_amo/host/vault_sealed_pub.bin
+rm -f build_amo/host/verify.sig build_amo/host/verify_digest build_amo/host/verify_pub
+rm -f build_amo/host/decode_log.py
+rm -rf build_amo/host/__pycache__
 cd build_amo && zip -r "../$AMO_SOURCE" ./* && cd ..
 
 # Cleanup

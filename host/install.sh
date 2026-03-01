@@ -88,6 +88,10 @@ mkdir -p "$INSTALL_DIR/quarantine"
 echo "🚚 Migrating host files to system storage..."
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Security: Capture source hash BEFORE copy to prevent TOCTOU attacks.
+# If the file is tampered between hash-time and copy-time, the verification below will catch it.
+SRC_HASH_PRE=$(sha256sum "$DIR/clamav_engine.py" | cut -d' ' -f1)
+
 cp "$DIR/clamav_engine.py" "$INSTALL_DIR/$HOST_NAME.py"
 cp "$DIR/yara_sanitizer.py" "$INSTALL_DIR/"
 cp "$DIR/tpm_provider.py" "$INSTALL_DIR/"
@@ -98,6 +102,15 @@ fi
 if [ -d "$DIR/signatures" ]; then
     cp -r "$DIR/signatures/"* "$INSTALL_DIR/signatures/"
 fi
+
+# Verify copy integrity: hash the destination and compare with source hash
+DST_HASH_POST=$(sha256sum "$INSTALL_DIR/$HOST_NAME.py" | cut -d' ' -f1)
+if [ "$SRC_HASH_PRE" != "$DST_HASH_POST" ]; then
+    echo "❌ INTEGRITY ERROR: Host script copy failed verification! Source and destination hashes do not match."
+    echo "   This may indicate a TOCTOU attack or disk error. Aborting installation."
+    exit 1
+fi
+echo "✅ Copy integrity verified (SHA-256 match)."
 
 # Migration of config or generation of new one
 echo "🔐 Performing Vicious Baseline Seal..."

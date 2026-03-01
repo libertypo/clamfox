@@ -32,7 +32,7 @@ def _setup_i18n():
         lang = locale.getlocale()[0] or os.environ.get('LANG', 'en_US').split('.')[0]
         t = gettext.translation('clamav_host', localedir, languages=[lang[:2]], fallback=True)
         return t.gettext
-    except:
+    except Exception:
         # Fallback to English literal if translation is missing
         return lambda s: s
 
@@ -55,8 +55,22 @@ _output_lock = threading.Lock()
 _config_lock = threading.Lock()
 
 # Multi-Core Engines
-_thread_pool = ThreadPoolExecutor(max_workers=10)
-_process_pool = ProcessPoolExecutor(max_workers=os.cpu_count() or 4)
+# Security: max_workers is explicitly capped to prevent resource exhaustion
+# under burst download events (e.g. a page triggering many simultaneous scans).
+# Thread pool: I/O-bound tasks (messaging, network checks, file reads).
+_thread_pool = ThreadPoolExecutor(max_workers=6)
+# Process pool: CPU-bound tasks (YARA scanning, hashing). Capped at 4 to protect
+# low-end hardware and avoid spawning more processes than logical cores.
+_process_pool = ProcessPoolExecutor(max_workers=min(os.cpu_count() or 2, 4))
+
+# Security: Resolve external tool paths at startup using shutil.which to prevent
+# PATH hijacking attacks (a malicious binary earlier in PATH could otherwise be used).
+_BIN_FILE     = shutil.which("file")
+_BIN_7Z       = shutil.which("7z")
+_BIN_FRESHCLAM = shutil.which("freshclam")
+_BIN_WL_PASTE = shutil.which("wl-paste")
+_BIN_XCLIP    = shutil.which("xclip")
+_BIN_SYSTEMCTL = shutil.which("systemctl")
 
 import itertools
 import base64
@@ -69,7 +83,7 @@ def secure_log_encode(text):
         key = itertools.cycle(_LOG_KEY)
         obf = bytes(x ^ y for x, y in zip(text.encode('utf-8'), key))
         return base64.b64encode(obf).decode('utf-8')
-    except:
+    except Exception:
         return text
 
 def secure_log_decode(text):
@@ -77,7 +91,7 @@ def secure_log_decode(text):
         dec = base64.b64decode(text.strip().encode('utf-8'))
         key = itertools.cycle(_LOG_KEY)
         return bytes(x ^ y for x, y in zip(dec, key)).decode('utf-8')
-    except:
+    except Exception:
         return text.strip()
 
 # Helper to log for debugging native messaging
@@ -92,7 +106,7 @@ def log_debug(msg):
     try:
         with open(log_path, "a") as f:
             f.write(secure_log_encode(sanitized) + "\n")
-    except:
+    except OSError:
         pass
 
 # Helper to get the intelligence runtime storage directory
@@ -103,7 +117,7 @@ def get_run_dir():
         if not os.path.exists(path):
             os.makedirs(path, exist_ok=True, mode=0o700)
         return path
-    except:
+    except OSError:
         path = f"/tmp/clamfox_{uid}"
         os.makedirs(path, exist_ok=True, mode=0o700)
         return path
@@ -225,7 +239,7 @@ def detect_dist_info():
                         "install": "sudo pacman -S clamav",
                         "optimize": "sudo systemctl enable --now clamav-daemon clamav-freshclam clamav-clamonacc"
                     }
-    except:
+    except (OSError, KeyError, json.JSONDecodeError):
         pass
     return {
         "install": "sudo apt install clamav (or equivalent)",
@@ -291,7 +305,7 @@ def check_tor_reachable():
                 s.settimeout(0.5)
                 if s.connect_ex(('127.0.0.1', port)) == 0:
                     return True, port
-        except:
+        except OSError:
             continue
     return False, None
 
@@ -472,7 +486,7 @@ def quarantine_file(filepath):
         try:
             os.remove(filepath)
             return True
-        except:
+        except OSError:
             return False
 
 def lock_file(filepath):
@@ -574,7 +588,8 @@ def verify_binary_integrity(binary_path, stored_binary_hash=None):
                 return False
                 
         return True
-    except:
+    except Exception as e:
+        log_debug(f"verify_binary_integrity failed: {e}")
         return False
 
 def verify_environment():
@@ -622,7 +637,8 @@ def check_malwarebazaar(filepath):
         try:
             process = subprocess.run(cmd, capture_output=True, timeout=_NETWORK_TIMEOUT)
             success = (process.returncode == 0)
-        except:
+        except (subprocess.TimeoutExpired, OSError) as e:
+            log_debug(f"MalwareBazaar fetch failed: {e}")
             success = False
         
         data = {}
@@ -630,7 +646,8 @@ def check_malwarebazaar(filepath):
             with open(tmp_resp) as f:
                 data = json.load(f)
             try: os.unlink(tmp_resp)
-            except: pass
+            except OSError:
+                pass
             if data.get("query_status") == "ok":
                 # Found in database - confirm threat
                 return {"status": "mb_infected", "data": data.get("data", [{}])[0]}
@@ -721,7 +738,7 @@ def encrypt_payload(data):
             encrypted.append(byte ^ key[i % len(key)])
         import base64
         return base64.b64encode(encrypted).decode('utf-8')
-    except:
+    except Exception:
         return None
 
 def submit_community_burn(target, threat_type, details):
@@ -767,7 +784,7 @@ def submit_community_burn(target, threat_type, details):
         if os.path.exists(burn_ledger):
             with open(burn_ledger, "r") as f:
                 try: data = json.load(f)
-                except: data = []
+                except (ValueError, json.JSONDecodeError): data = []
         
         # Avoid duplicate burns
         if any(d.get("target") == sharable_target for d in data):
@@ -790,11 +807,13 @@ def submit_community_burn(target, threat_type, details):
 
 def get_mime_type(filepath):
     """Detect the real MIME type of a file using 'file' command."""
+    if not _BIN_FILE:
+        return None
     try:
-        process = subprocess.run(['file', '-b', '--mime-type', '--', filepath], capture_output=True, text=True)
+        process = subprocess.run([_BIN_FILE, '-b', '--mime-type', '--', filepath], capture_output=True, text=True)
         if process.returncode == 0:
             return process.stdout.strip()
-    except:
+    except (OSError, subprocess.SubprocessError):
         pass
     return None
 
@@ -906,8 +925,8 @@ def check_high_threat_container(filepath, deep_scan=False):
 
     # 3. Fallback: OS CLI 7z (For obscure formats like .iso, .7z, .rar)
     try:
-        if shutil.which("7z"):
-            process = subprocess.run(['7z', 'l', '--', filepath], capture_output=True, text=True, timeout=10)
+        if _BIN_7Z:
+            process = subprocess.run([_BIN_7Z, 'l', '--', filepath], capture_output=True, text=True, timeout=10)
             if process.returncode == 0:
                 lines = process.stdout.lower().split('\n')
                 file_count = 0
@@ -929,7 +948,8 @@ def check_high_threat_container(filepath, deep_scan=False):
                 if deep_scan and file_count > 0:
                     log_debug(f"Hardware scaling active: Shell Unpacking {filename}")
                     with tempfile.TemporaryDirectory(dir=get_run_dir()) as tmp_dir:
-                        subprocess.run(['7z', 'x', '-o' + tmp_dir, '--', filepath], capture_output=True, timeout=60)
+                        if _BIN_7Z:
+                            subprocess.run([_BIN_7Z, 'x', '-o' + tmp_dir, '--', filepath], capture_output=True, timeout=60)
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
                         futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
                         for f in futures:
@@ -953,7 +973,7 @@ def scan_file_basic(filepath):
             virus = output.split(": ")[-1].replace(" FOUND", "")
             return {"status": "infected", "virus": virus, "target": filepath}
         return {"status": "clean", "target": filepath}
-    except:
+    except (subprocess.TimeoutExpired, OSError, subprocess.SubprocessError):
         return {"status": "error", "target": filepath}
 
 def check_lnk_threat(filepath):
@@ -970,7 +990,7 @@ def check_lnk_threat(filepath):
             for shell in shells:
                 if shell in content:
                     return True, _("Malicious LNK: Points to system shell ({shell})").format(shell=shell.decode())
-    except:
+    except OSError:
         pass
     return False, None
 
@@ -980,7 +1000,9 @@ def check_on_access_status():
         # Check various common service names across distros
         services = ['clamav-daemon', 'clamd@scan', 'clamd', 'clamonacc', 'clamav-clamonacc']
         for svc in services:
-            p = subprocess.run(['systemctl', 'is-active', svc], capture_output=True, text=True, timeout=1)
+            if not _BIN_SYSTEMCTL:
+                break
+            p = subprocess.run([_BIN_SYSTEMCTL, 'is-active', svc], capture_output=True, text=True, timeout=1)
             if p.returncode == 0:
                 log_debug(f"On-Access service detected: {svc}")
                 return "active"
@@ -1016,10 +1038,8 @@ def load_url_cache(force=False):
         _url_cache = new_cache
         _cache_last_loaded = mtime
         return True
-    except:
+    except (OSError, IOError):
         return False
-
-_phish_cache = None
 _phish_last_loaded = 0
 
 def load_phish_cache(force=False):
@@ -1043,7 +1063,7 @@ def load_phish_cache(force=False):
         _phish_cache = new_cache
         _phish_last_loaded = mtime
         return True
-    except:
+    except (OSError, IOError):
         return False
 
 _whitelist_cache = None
@@ -1093,7 +1113,7 @@ def check_phishing_db(url):
             root = ".".join(parts[-2:])
             if root in _phish_cache:
                 return True
-    except:
+    except (OSError, AttributeError):
         pass
     return False
 
@@ -1109,7 +1129,7 @@ def check_homograph_attack(url):
             domain.encode('ascii')
         except UnicodeEncodeError:
             return True, _("Homoglyph Suspect (Non-ASCII Domain)")
-    except:
+    except Exception:
         pass
     return False, None
 
@@ -1125,7 +1145,7 @@ def check_similarity_to_golden(url):
                 db = json.load(f)
                 golden_list = [domain for hvt in db.get("hvts", []) for domain in hvt.get("domains", [])]
                 global_whitelist = db.get("global_whitelist", [])
-        except:
+        except (OSError, json.JSONDecodeError):
             golden_list = ["paypal.com", "chase.com", "bankofamerica.com", "microsoft.com", "google.com", "apple.com", "amazon.com"]
             global_whitelist = []
         
@@ -1166,7 +1186,7 @@ def check_similarity_to_golden(url):
                 diff = sum(1 for a, b in zip(domain, target) if a != b)
                 if diff == 1:
                     return True, _("Typosquatting Suspected: Highly similar to {target}").format(target=target.upper())
-    except:
+    except Exception:
         pass
     return False, None
 
@@ -1187,9 +1207,11 @@ def start_clipper_shield():
             try:
                 p = None
                 if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-paste"):
-                    p = subprocess.run(['wl-paste', '-n'], capture_output=True, text=True, timeout=1)
+                    if _BIN_WL_PASTE:
+                        p = subprocess.run([_BIN_WL_PASTE, '-n'], capture_output=True, text=True, timeout=1)
                 elif shutil.which("xclip"):
-                    p = subprocess.run(['xclip', '-o', '-selection', 'clipboard'], capture_output=True, text=True, timeout=1)
+                    if _BIN_XCLIP:
+                        p = subprocess.run([_BIN_XCLIP, '-o', '-selection', 'clipboard'], capture_output=True, text=True, timeout=1)
                 
                 if p is not None and p.returncode == 0:
                     val = p.stdout.strip()
@@ -1287,7 +1309,7 @@ def check_url_reputation(url):
             with open(os.path.join(os.path.dirname(__file__), "trust_db.json"), "r") as f:
                 db = json.load(f)
                 golden_list = [domain for hvt in db.get("hvts", []) for domain in hvt.get("domains", [])]
-        except:
+        except (OSError, json.JSONDecodeError):
             golden_list = ["paypal.com", "chase.com", "bankofamerica.com", "microsoft.com", "google.com", "apple.com", "amazon.com"]
         
         # 1. Matches golden domain or subdomain
@@ -1534,7 +1556,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                     try:
                         with open(os.path.join(os.path.dirname(__file__), "alert_log.txt"), "a") as f:
                             f.write(secure_log_encode(f"[{time.ctime()}] SEAL BROKEN: {reason}") + "\n")
-                    except:
+                    except OSError:
                         pass
                 
                 send_message({"status": "error", "error": _("Unauthorized: Security Handshake Failed"), "tamper": True, "reason": reason})
@@ -1635,7 +1657,11 @@ def handle_message(message, secret, config, stored_hash, current_hash):
         elif action == "force_db_update":
             try:
                 # Trigger freshclam
-                process = subprocess.run(['freshclam'], capture_output=True, text=True)
+                if _BIN_FRESHCLAM:
+                    process = subprocess.run([_BIN_FRESHCLAM], capture_output=True, text=True)
+                else:
+                    log_debug("freshclam not found in PATH — database update skipped.")
+                    return {"status": "error", "error": "freshclam not found"}
                 send_message({
                     "status": "ok" if process.returncode == 0 else "error",
                     "output": process.stdout[:500],
