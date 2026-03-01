@@ -26,20 +26,6 @@ function isSiteTrusted() {
     return isHVT || isWhitelisted || isUserWhitelisted;
 }
 
-// Utility: Parse color and check alpha transparency numerically
-function isActuallyTransparent(style) {
-    const bg = style.backgroundColor;
-    const opacity = parseFloat(style.opacity);
-
-    if (opacity < 0.1) return true;
-    if (bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') return true;
-
-    // Handle rgba(r, g, b, a) or hsla(h, s, l, a)
-    const match = bg.match(/rgba?\(.*,\s*([\d.]+)\)/) || bg.match(/hsla?\(.*,\s*([\d.]+)\)/);
-    if (match && parseFloat(match[1]) < 0.1) return true;
-
-    return false;
-}
 
 // Initialize container
 function getContainer() {
@@ -136,49 +122,68 @@ async function runPromptInjectionShield(hvtData) {
     if (isUserWhitelisted || hvtData.is_challenge_mode) return; // User allowed or Cloudflare challenge active
 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, null, false);
-    let node;
 
-    while (node = walker.nextNode()) {
-        const style = window.getComputedStyle(node);
+    // ASYNC CHUNKED SCAN (Prevents UI Hangs)
+    const CHUNK_SIZE = 250;
 
-        // Robust Accessibility Check (Still used for false-positive prevention)
-        const isAccessibilityElement =
-            (node.classList && (
-                node.classList.contains("sr-only") ||
-                node.classList.contains("visually-hidden") ||
-                node.classList.contains("screen-reader-only")
-            )) ||
-            node.hasAttribute("aria-label") ||
-            node.hasAttribute("aria-hidden") ||
-            node.hasAttribute("role");
+    const processChunk = () => {
+        let count = 0;
+        let node;
 
-        const isHidden = style.display === 'none' ||
-            style.visibility === 'hidden' ||
-            parseFloat(style.opacity) < 0.1 ||
-            parseInt(style.fontSize) < 2 ||
-            (style.position === 'absolute' && (parseInt(style.left) < -5000 || parseInt(style.top) < -5000));
+        while (count < CHUNK_SIZE && (node = walker.nextNode())) {
+            count++;
+            const style = window.getComputedStyle(node);
 
-        if (isHidden) {
-            // PROACTIVE BYPASS: If we are on a Bank/HVT or whitelisted site, Prompt Injection risk is near-zero.
-            if (isHVT || isUserWhitelisted) continue;
+            // Robust Accessibility Check (Still used for false-positive prevention)
+            const isAccessibilityElement =
+                (node.classList && (
+                    node.classList.contains("sr-only") ||
+                    node.classList.contains("visually-hidden") ||
+                    node.classList.contains("screen-reader-only")
+                )) ||
+                node.hasAttribute("aria-label") ||
+                node.hasAttribute("aria-hidden") ||
+                node.hasAttribute("role");
 
-            // Skip scanning if it's explicitly an accessibility element (Prevents False Positives)
-            if (isAccessibilityElement) continue;
+            const isHidden = style.display === 'none' ||
+                style.visibility === 'hidden' ||
+                parseFloat(style.opacity) < 0.1 ||
+                parseInt(style.fontSize) < 2 ||
+                (style.position === 'absolute' && (parseInt(style.left) < -5000 || parseInt(style.top) < -5000));
 
-            const textContent = node.textContent.toLowerCase();
-            if (injectionKeywords.some(kw => textContent.includes(kw))) {
-                console.warn("🛡️ PROMPT INJECTION SHIELD: Detected potential hidden prompt injection!");
-                const forensics = captureForensicSnapshot(node);
-                showToast("complete", "infected", browser.i18n.getMessage("promptInjectionRisk"), browser.i18n.getMessage("promptInjectionMessage"));
-                browser.runtime.sendMessage({
-                    action: "log_behavior",
-                    threat: "Hidden Prompt Injection / Command Injection Attempt",
-                    forensics: forensics
-                }).catch(() => { });
-                return; // One warning per page is enough
+            if (isHidden) {
+                // PROACTIVE BYPASS: If we are on a Bank/HVT or whitelisted site, Prompt Injection risk is near-zero.
+                if (isHVT || isUserWhitelisted) continue;
+
+                // Skip scanning if it's explicitly an accessibility element (Prevents False Positives)
+                if (isAccessibilityElement) continue;
+
+                const textContent = node.textContent.toLowerCase();
+                if (injectionKeywords.some(kw => textContent.includes(kw))) {
+                    console.warn("🛡️ PROMPT INJECTION SHIELD: Detected potential hidden prompt injection!");
+                    const forensics = captureForensicSnapshot(node);
+                    showToast("complete", "infected", browser.i18n.getMessage("promptInjectionRisk"), browser.i18n.getMessage("promptInjectionMessage"));
+                    browser.runtime.sendMessage({
+                        action: "log_behavior",
+                        threat: "Hidden Prompt Injection / Command Injection Attempt",
+                        forensics: forensics
+                    }).catch(() => { });
+                    return; // Stop scan on first match
+                }
             }
         }
-    }
+
+        if (node) {
+            // Schedule next chunk
+            if (window.requestIdleCallback) {
+                requestIdleCallback(processChunk);
+            } else {
+                setTimeout(processChunk, 10);
+            }
+        }
+    };
+
+    processChunk();
 
     // 2. Monitoring: Detect unauthorized interaction on sensitive portals
     const monitoredPortals = ["chat.example.com"];
@@ -673,35 +678,26 @@ async function deployDOMAnomalyShield(hvtData) {
 
         const target = e.target;
         const style = window.getComputedStyle(target);
+        const opacity = parseFloat(style.opacity);
+        const isTransparent = opacity < 0.2 || style.backgroundColor === 'rgba(0, 0, 0, 0)' || style.backgroundColor === 'transparent';
 
         // Check if this specific element was already pre-flagged as suspect
         let isConfirmedThreat = SUSPECT_OVERLAYS.has(target);
 
         // SURGICAL ANALYSIS: Check stack depth at click point if top element is ghostly
-        if (!isConfirmedThreat && isActuallyTransparent(style)) {
+        if (!isConfirmedThreat && isTransparent) {
             const elements = document.elementsFromPoint(e.clientX, e.clientY);
             if (elements.length > 1) {
                 // Find what's directly beneath our ghostly target
                 const secondElement = elements[1];
                 if (secondElement) {
-                    const secondStyle = window.getComputedStyle(secondElement);
                     const tag = secondElement.tagName.toLowerCase();
+                    const isHighValueTarget = ['a', 'button', 'input', 'select', 'textarea'].includes(tag);
 
-                    // Broadened High Value Target Detection
-                    const isSemanticHVT = ['a', 'button', 'input', 'select', 'textarea'].includes(tag);
-                    const isCustomHVT = secondElement.getAttribute('onclick') ||
-                        secondElement.getAttribute('role') === 'button' ||
-                        secondStyle.cursor === 'pointer';
-
-                    const isInteractive = isSemanticHVT || isCustomHVT;
-
-                    // Verify stacking: Interceptor must be above target
-                    const targetZ = parseInt(secondStyle.zIndex) || 0;
-                    const interceptorZ = parseInt(style.zIndex) || 0;
-
-                    if (isInteractive && interceptorZ >= targetZ) {
+                    // If we have a ghostly layer on top of a solid UI interaction target, it's an Interception Anomaly
+                    if (isHighValueTarget) {
                         isConfirmedThreat = true;
-                        console.warn(`🛡️ SURGICAL SHIELD: Intercepted stealthy overlay covering interactive <${tag}>!`);
+                        console.warn(`🛡️ SURGICAL SHIELD: Intercepted stealthy overlay covering <${tag}>!`);
                     }
                 }
             }
@@ -760,20 +756,21 @@ async function deployDOMAnomalyShield(hvtData) {
         const bg = style.backgroundColor;
         const pointerEvents = style.pointerEvents;
 
+        const isTransparent = opacity < 0.1 || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent';
         const takesClicks = pointerEvents !== 'none';
 
-        if (isActuallyTransparent(style) && takesClicks) {
+        if (isTransparent && takesClicks) {
             const rect = node.getBoundingClientRect();
             const vWidth = window.innerWidth;
             const vHeight = window.innerHeight;
 
             if (vWidth === 0 || vHeight === 0) return;
 
-            // Coverage Threshold: 10% of viewport for pre-flagging (More sensitive)
+            // Coverage Threshold: 45% of viewport (Aggressive reduction of false positives)
             const area = rect.width * rect.height;
-            const isSignificant = area > (vWidth * vHeight * 0.10);
+            const isMassive = area > (vWidth * vHeight * 0.45);
 
-            if (isSignificant) {
+            if (isMassive) {
                 if (isWhitelistedDynamic() || window.__CLAMFOX_BYPASS) return;
 
                 console.log("🛡️ SUSPECT OVERLAY DETECTED: Monitoring for click interception.");

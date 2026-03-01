@@ -1608,7 +1608,11 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 log_entry = f"[{timestamp}] ALERT: {reason}\n"
                 log_entry += f"  Target: {hostname} ({url})\n"
                 if forensics:
-                    log_entry += f"  Forensics: {json.dumps(forensics)}\n"
+                    if isinstance(forensics, dict):
+                        for k, v in forensics.items():
+                            log_entry += f"    > {k}: {v}\n"
+                    else:
+                        log_entry += f"  Forensics: {json.dumps(forensics)}\n"
                 log_entry += "-" * 80
                 
                 with open(log_file, "a") as f:

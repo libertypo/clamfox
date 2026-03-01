@@ -1,5 +1,5 @@
 # Script to package the extension
-VERSION="0.0.6.0"
+VERSION="0.0.6.3"
 FULL_PACKAGE="clamfox_full_${VERSION}.zip"
 AMO_SOURCE="clamfox_amo_source_${VERSION}.zip"
 XPI_FULL="clamfox_full_${VERSION}.xpi"
