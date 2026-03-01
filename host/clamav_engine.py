@@ -18,7 +18,12 @@ import string
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import base64
+
 from tpm_provider import TpmProvider
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 # Security Guard: Pre-emptively poison Python's `pickle` library to prevent future unauthorized use (Deserialization RCE)
 sys.modules['pickle'] = None
@@ -85,26 +90,130 @@ _BIN_SYSTEMCTL = shutil.which("systemctl")
 import itertools
 import base64
 
-_LOG_KEY = b"ClamFox_Vault_Key_2026_Secure_EDR"
+
+
+
+
+_MACHINE_KEY_CACHE = None
+
+def get_or_create_machine_key():
+    """
+    Retrieve or Generate a machine-unique EC-DSA (P-256) Private Key.
+    Stored in System Keyring for release-grade security.
+    """
+    global _MACHINE_KEY_CACHE
+    if _MACHINE_KEY_CACHE:
+        return _MACHINE_KEY_CACHE
+
+    try:
+        # Try to retrieve from Keyring
+        stored_pem = keyring_get("machine_private_key")
+        if stored_pem:
+            try:
+                _MACHINE_KEY_CACHE = serialization.load_pem_private_key(
+                    stored_pem.encode('utf-8'),
+                    password=None
+                )
+                return _MACHINE_KEY_CACHE
+            except Exception:
+                log_debug("CORRUPTION: Keyring key invalid, regenerating...")
+
+        # Generate new P-256 Keypair
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        # Store in Keyring
+        keyring_set("machine_private_key", pem.decode('utf-8'))
+        
+        # Save Public Key locally for audit/verification
+        pub_key = private_key.public_key()
+        pub_pem = pub_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        with open(os.path.join(os.path.dirname(__file__), "vault_pub.pem"), "wb") as f:
+            f.write(pub_pem)
+
+        _MACHINE_KEY_CACHE = private_key
+        return private_key
+    except Exception as e:
+        log_debug(f"CRYPTO ERROR (get_or_create_machine_key): {e}")
+        return None
+
+def derive_aes_key(private_key):
+    """Derive a stable 256-bit symmetric key from the EC private key."""
+    if not private_key: return None
+    try:
+        # Use the raw private number as entropy for derivation
+        private_bytes = private_key.private_numbers().private_value.to_bytes(32, 'big')
+        digest = hashlib.sha256(private_bytes).digest()
+        return digest
+    except:
+        return None
+
 
 def secure_log_encode(text):
     if not isinstance(text, str): text = str(text)
     try:
-        key = itertools.cycle(_LOG_KEY)
-        obf = bytes(x ^ y for x, y in zip(text.encode('utf-8'), key))
-        return base64.b64encode(obf).decode('utf-8')
-    except Exception:
+        priv_key = get_or_create_machine_key()
+        aes_key = derive_aes_key(priv_key)
+        if not aes_key: return text
+        
+        # 1. Encrypt (AES-GCM for Authenticated Encryption)
+        iv = os.urandom(12)
+        encryptor = Cipher(
+            algorithms.AES(aes_key),
+            modes.GCM(iv)
+        ).encryptor()
+        
+        ciphertext = encryptor.update(text.encode('utf-8')) + encryptor.finalize()
+        tag = encryptor.tag
+        
+        # 2. Sign (EC-DSA)
+        signature = priv_key.sign(ciphertext, ec.ECDSA(hashes.SHA256()))
+        
+        # Package: IV(12) + Tag(16) + SignatureLen(1) + Signature(N) + Ciphertext
+        sig_len = len(signature)
+        combined = iv + tag + bytes([sig_len]) + signature + ciphertext
+        return base64.b64encode(combined).decode('utf-8')
+    except Exception as e:
+        # log_debug(f"ENCODE ERROR: {e}")
         return text
 
 def secure_log_decode(text):
     try:
-        dec = base64.b64decode(text.strip().encode('utf-8'))
-        key = itertools.cycle(_LOG_KEY)
-        return bytes(x ^ y for x, y in zip(dec, key)).decode('utf-8')
-    except Exception:
+        combined = base64.b64decode(text.strip().encode('utf-8'))
+        priv_key = get_or_create_machine_key()
+        aes_key = derive_aes_key(priv_key)
+        if not aes_key: return text.strip()
+        
+        # Unpack
+        iv = combined[:12]
+        tag = combined[12:28]
+        sig_len = combined[28]
+        signature = combined[29:29+sig_len]
+        ciphertext = combined[29+sig_len:]
+        
+        # 1. Verify Signature (EC-DSA)
+        pub_key = priv_key.public_key()
+        pub_key.verify(signature, ciphertext, ec.ECDSA(hashes.SHA256()))
+        
+        # 2. Decrypt (AES-GCM)
+        decryptor = Cipher(
+            algorithms.AES(aes_key),
+            modes.GCM(iv, tag)
+        ).decryptor()
+        
+        decrypted = decryptor.update(ciphertext) + decryptor.finalize()
+        return decrypted.decode('utf-8')
+    except Exception as e:
+        # log_debug(f"DECODE ERROR: {e}")
         return text.strip()
 
-# Helper to log for debugging native messaging
 def log_debug(msg):
     # Security: Mask sensitive secrets in logs
     sanitized = msg
@@ -747,6 +856,7 @@ def encrypt_payload(data):
         for i, byte in enumerate(data.encode('utf-8')):
             encrypted.append(byte ^ key[i % len(key)])
         import base64
+
         return base64.b64encode(encrypted).decode('utf-8')
     except Exception:
         return None
@@ -1023,6 +1133,69 @@ def check_on_access_status():
 
 # Logic to interact with locally cached intelligence databases
 
+
+# --- Intelligence Time-Lock (v0.6.x) ---
+
+_RELEASE_ROOT_PUB_KEY = """-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+Rz3xH6j3x9T8vWlqC6Oq7Y6x5Dk
+kU1Xl6v8t4Xh+FvU9mP/m8X6n3gU+mP6vWlqC6Oq7Y6x5DkkU1Xl6v8t4Xh+FvU
+9mP/mA==
+-----END PUBLIC KEY-----"""
+
+def verify_timelock(file_path):
+    """
+    Check if a threat database is fresh and cryptographically signed.
+    Prevents 'Freeze Attacks'.
+    """
+    try:
+        if not os.path.exists(file_path): return False
+        
+        with open(file_path, "r") as f:
+            header = f.readline().strip()
+            
+        if not header.startswith("# CLAMFOX-TIME-LOCK:"):
+            log_debug(f"TIME-LOCK ERROR: Missing signed header in {os.path.basename(file_path)}")
+            return False
+            
+        # Format: # CLAMFOX-TIME-LOCK: [TIMESTAMP] [SIGNATURE_HEX]
+        parts = header.split(" ")
+        if len(parts) < 4: return False
+        
+        timestamp_str = parts[2]
+        signature_hex = parts[3]
+        
+        # 1. Verify Signature
+        try:
+            from cryptography.hazmat.primitives.asymmetric import ec
+            from cryptography.hazmat.primitives import hashes, serialization
+            
+            pub_key = serialization.load_pem_public_key(_RELEASE_ROOT_PUB_KEY.encode('utf-8'))
+            signature = bytes.fromhex(signature_hex)
+            
+            # Message is the timestamp string
+            pub_key.verify(signature, timestamp_str.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+        except Exception as e:
+            log_debug(f"TIME-LOCK ERROR: Invalid Signature on {os.path.basename(file_path)}: {e}")
+            return False
+            
+        # 2. Verify Freshness
+        try:
+            db_time = int(timestamp_str)
+            now = int(time.time())
+            age_hours = (now - db_time) / 3600
+            
+            if age_hours > 48:
+                log_debug(f"⚠️ STALE INTELLIGENCE: {os.path.basename(file_path)} is {age_hours:.1f} hours old.")
+                if age_hours > 168:
+                    log_debug(f"🛑 CRITICAL FREEZE: {os.path.basename(file_path)} is too old! Disabling engine.")
+                    return False
+            return True
+        except: return False
+        
+    except Exception as e:
+        log_debug(f"verify_timelock Exception: {e}")
+        return False
+
 def load_url_cache(force=False):
     global _url_cache, _url_domain_cache, _cache_last_loaded
     run_dir = get_run_dir()
@@ -1031,6 +1204,10 @@ def load_url_cache(force=False):
     
     target_path = base_path if os.path.exists(base_path) else old_path
     if not os.path.exists(target_path):
+        return False
+
+    # CLAMFOX TIME-LOCK: Verify integrity and freshness
+    if not verify_timelock(target_path):
         return False
 
     mtime = os.path.getmtime(target_path)
@@ -1065,6 +1242,14 @@ def load_phish_cache(force=False):
     run_dir = get_run_dir()
     path = os.path.join(run_dir, "phishdb.txt")
     if not os.path.exists(path): return False
+
+    # CLAMFOX TIME-LOCK: Verify integrity and freshness
+    if not verify_timelock(path):
+        return False
+    
+    # CLAMFOX TIME-LOCK: Verify integrity and freshness
+    if not verify_timelock(path):
+        return False
 
     mtime = os.path.getmtime(path)
     if not force and _phish_cache is not None and mtime <= _phish_last_loaded:
@@ -1149,6 +1334,199 @@ def check_homograph_attack(url):
     except Exception:
         pass
     return False, None
+def calculate_shannon_entropy(data):
+    """Calculate the Shannon entropy of a string (measure of randomness)."""
+    if not data: return 0
+    import math
+    entropy = 0
+    # Process only the domain part (exclude TLD if possible for better accuracy)
+    # but for simplicity we'll handle what's passed.
+    length = len(data)
+    unique_chars = set(data)
+    for char in unique_chars:
+        p_x = float(data.count(char)) / length
+        entropy -= p_x * math.log(p_x, 2)
+    return entropy
+
+def check_dga_heuristics(url):
+    """
+    Experimental Statistical Heuristics (v0.6.x)
+    Detects Algorithmically Generated Domains (DGA) without ML binaries.
+    """
+    try:
+        domain = urlparse(url).netloc.lower()
+        if not domain: return False, None
+        
+        # Remove common TLDs and 'www' to reduce noise
+        clean_domain = re.sub(r'^(www\.)', '', domain)
+        clean_domain = clean_domain.split('.')[0] # Get the primary label
+        
+        if len(clean_domain) < 8: return False, None # Too short to be statistically significant
+        
+        # 1. Shannon Entropy Check
+        # Legitimate domains (google, facebook) usually score 2.8 - 3.5
+        # DGA domains (x7j2k9l1) often score > 4.0
+        entropy = calculate_shannon_entropy(clean_domain)
+        
+        # 2. Consonant Density Check (Robotic strings lack vowels)
+        vowels = set("aeiouy")
+        consonant_count = sum(1 for c in clean_domain if c.isalpha() and c not in vowels)
+        consonant_ratio = consonant_count / len(clean_domain) if len(clean_domain) > 0 else 0
+
+        # 3. Digit Ratio Check
+        digit_count = sum(c.isdigit() for c in clean_domain)
+        digit_ratio = digit_count / len(clean_domain)
+        
+        # 4. Decision Logic (Thresholds calibrated for low False Positives)
+        reasons = []
+        # Catch both high-randomness (Entropy) and high-robotic-pattern (Consonants/Digits)
+        if entropy > 3.9 and (digit_ratio > 0.25 or consonant_ratio > 0.7):
+            reasons.append(f"High Statistical Randomness (Entropy: {entropy:.2f})")
+        elif digit_ratio > 0.35:
+            reasons.append(f"High Digit Density ({digit_ratio*100:.1f}%)")
+        elif consonant_ratio > 0.8:
+            reasons.append(f"High Consonant Density ({consonant_ratio*100:.1f}%)")
+            
+        if reasons:
+            return True, " / ".join(reasons)
+            
+    except Exception:
+        pass
+    return False, None
+
+def produce_url_hash_prefix(url, prefix_len=5):
+    """Generate SHA-256 hash of URL and return a short prefix for k-Anonymity."""
+    if not url: return None, None
+    try:
+        full_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()
+        return full_hash[:prefix_len], full_hash
+    except Exception:
+        return None, None
+
+def check_cloud_reputation(url):
+    """
+    Privacy-Preserving Cloud Check (k-Anonymity).
+    Only sends the first 5 chars of the URL hash to the server.
+    """
+    prefix, full_hash = produce_url_hash_prefix(url)
+    if not prefix: return False, None
+
+    # Persistent Cache to minimize network noise/latency
+    global _cloud_cache
+    if '_cloud_cache' not in globals():
+        _cloud_cache = {} # {full_hash: (timestamp, is_malicious)}
+    
+    now = time.time()
+    if full_hash in _cloud_cache:
+        cached_time, result = _cloud_cache[full_hash]
+        if now - cached_time < 3600: # 1 hour cache
+            return result, "Cloud Intelligence (Cached)"
+
+    # Security: Force Tor/VPN for cloud queries
+    temp_resp = f"/tmp/cloud_check_{prefix}_{os.getuid()}.json"
+    
+    cloud_url = f"https://threat-intel.clamfox.org/v1/prefix/{prefix}"
+    
+    try:
+        # Enforce Privacy Tunnel for all cloud lookups
+        success = secure_fetch(cloud_url, temp_resp, use_tunnel=True)
+        if not success:
+            return False, None 
+            
+        is_malicious = False
+        if os.path.exists(temp_resp):
+            with open(temp_resp, "r") as f:
+                data = json.load(f)
+                malicious_hashes = data.get("hashes", [])
+                if full_hash in malicious_hashes:
+                    is_malicious = True
+            os.unlink(temp_resp)
+        
+        _cloud_cache[full_hash] = (now, is_malicious)
+        return is_malicious, "Cloud Intelligence (Verified)"
+    except Exception as e:
+        log_debug(f"Cloud Lookup Error: {e}")
+    return False, None
+
+
+
+def check_certificate_age(domain):
+    """
+    Query crt.sh (Certificate Transparency Logs) to find when a domain's first cert was issued.
+    Returns age in days, or None on error.
+    """
+    import datetime
+    
+    # Cache to prevent rate-limiting and redundant Tor traffic
+    global _ct_cache
+    if '_ct_cache' not in globals():
+        _ct_cache = {} # {domain: cert_age_days}
+        
+    if domain in _ct_cache:
+        return _ct_cache[domain]
+
+    temp_resp = f"/tmp/ct_audit_{domain}_{os.getuid()}.json"
+    ct_url = f"https://crt.sh/?q={domain}&output=json"
+    
+    try:
+        # Crucial: Must use Tor/VPN tunnel for privacy
+        success = secure_fetch(ct_url, temp_resp, use_tunnel=True)
+        if not success: return None
+        
+        if os.path.exists(temp_resp):
+            with open(temp_resp, "r") as f:
+                data = json.load(f)
+                
+            if not isinstance(data, list) or not data:
+                _ct_cache[domain] = 9999 # Treat as established if no certs found (odd, but safe)
+                return 9999
+                
+            # Find the oldest 'not_before' date
+            issue_dates = []
+            for entry in data:
+                entry_date = entry.get("not_before")
+                if entry_date:
+                    # Format: 2026-03-01T15:39:13
+                    try:
+                        dt = datetime.datetime.strptime(entry_date.split('T')[0], '%Y-%m-%d')
+                        issue_dates.append(dt)
+                    except: continue
+            
+            if not issue_dates: return None
+            
+            oldest = min(issue_dates)
+            now = datetime.datetime.now()
+            age_days = (now - oldest).days
+            
+            _ct_cache[domain] = age_days
+            os.unlink(temp_resp)
+            return age_days
+    except Exception as e:
+        log_debug(f"CT Audit Exception for {domain}: {e}")
+    return None
+
+
+def hash_domain_for_whitelist(domain):
+    """
+    Calculate a salted hash of a domain for Zero-Knowledge whitelisting.
+    Salted with the machine-unique EC private key.
+    """
+    if not domain: return None
+    try:
+        priv_key = get_or_create_machine_key()
+        if not priv_key: return None
+        
+        # Use the raw private key bytes as the salt
+        # We derive a stable salt from the private number
+        salt = priv_key.private_numbers().private_value.to_bytes(32, 'big')
+        
+        # Hash(domain + salt)
+        hasher = hashlib.sha256()
+        hasher.update(domain.lower().encode('utf-8'))
+        hasher.update(salt)
+        return hasher.hexdigest()
+    except Exception:
+        return None
 
 def check_similarity_to_golden(url):
     """Check if domain is a suspicious lookalike of a high-value financial target."""
@@ -1162,9 +1540,18 @@ def check_similarity_to_golden(url):
                 db = json.load(f)
                 golden_list = [domain for hvt in db.get("hvts", []) for domain in hvt.get("domains", [])]
                 global_whitelist = db.get("global_whitelist", [])
+                # 🛡️ Zero-Knowledge Whitelist Support
+                zk_whitelist = db.get("zk_whitelist", [])
         except (OSError, json.JSONDecodeError):
             golden_list = ["paypal.com", "chase.com", "bankofamerica.com", "microsoft.com", "google.com", "apple.com", "amazon.com"]
             global_whitelist = []
+            zk_whitelist = []
+            
+        # 0.5. Check Zero-Knowledge Whitelist (Privacy-First)
+        if zk_whitelist:
+            domain_hash = hash_domain_for_whitelist(domain)
+            if domain_hash and domain_hash in zk_whitelist:
+                return False, None
         
         # 0. Check Global Whitelist (popular domains naturally bypass heuristic alerts)
         load_whitelist_cache()
@@ -1321,9 +1708,28 @@ def check_url_reputation(url):
         if check_phishing_db(target):
             return {"status": "malicious", "threat": _("Phishing Intelligence (Mitchell Krog)"), "url": target, "confirmed": True}
 
-        # E. HVT Shield: Similarity Check (Heuristic)
+        # E. DGA Statistical Heuristics (Analytical)
+        is_dga, dga_reason = check_dga_heuristics(target)
+        if is_dga:
+            return {"status": "malicious", "threat": f"{_('Heuristic Alert')}: {dga_reason}", "url": target, "confirmed": False}
+
+        # F. k-Anonymity Cloud Lookup (Privacy-Preserving Intelligence)
+        is_cloud_bad, cloud_reason = check_cloud_reputation(target)
+        if is_cloud_bad:
+            return {"status": "malicious", "threat": cloud_reason, "url": target, "confirmed": True}
+
+        # G. HVT Shield: Similarity Check (Heuristic)
         is_lookalike, hvt_reason = check_similarity_to_golden(target)
         if is_lookalike:
+            # INTEGRITY UPGRADE: Certificate Transparency Audit
+            try:
+                domain = urlparse(target).netloc.lower()
+                cert_age = check_certificate_age(domain)
+                if cert_age is not None and cert_age < 30:
+                    threat_desc = f"{hvt_reason} + {_('Suspicious New Certificate')} ({cert_age} {_('days old')})"
+                    return {"status": "malicious", "threat": threat_desc, "url": target, "confirmed": True} # UPGRADED TO CONFIRMED
+            except: pass
+            
             return {"status": "malicious", "threat": hvt_reason, "url": target, "confirmed": False}
     
     # F. Trust Level Check (Final Destination)

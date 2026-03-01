@@ -33,6 +33,9 @@ clamfox_amo_0.0.4.5/
 eicar_test.txt
 da974eebe6414d4987d9*.xpi
 da974eebe6414d4987d9*.zip
+test_ram.py
+test_script.js
+test_update.py
 
 # Python
 __pycache__/
