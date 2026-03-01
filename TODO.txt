@@ -72,7 +72,7 @@
     - [x] HVT Shield: Heuristic detection of homographs and typosquatting 
           on the world's top financial and login portals.
     - [x] Prompt Injection Shield: Specialized defense against "Invisible 
-          Instructions" and background field hijacking on chat portals.
+          Instructions" and background field hijacking on monitored portals.
     - [x] High-Threat Container Analysis: Specialized forensic inspection of 
           ISO, VHD, and LNK files to detect HTML smuggling artifacts.
     - [x] Honeypot Decoys: Inject fake crypto/credentials to catch scraping scripts.

@@ -165,11 +165,11 @@ async function runPromptInjectionShield(hvtData) {
         }
     }
 
-    // 2. Chat Scuttle-Block: Detect unauthorized interaction on chat portals
-    const chatPortals = ["chat.example.com", "chat.example.com"];
+    // 2. Monitoring: Detect unauthorized interaction on sensitive portals
+    const monitoredPortals = ["chat.example.com"];
 
-    if (chatPortals.some(p => currentDomain.includes(p))) {
-        console.log("🛡️ PROMPT INJECTION SHIELD: Chat Portal active. Enabling Scuttle-Block.");
+    if (monitoredPortals.some(p => currentDomain.includes(p))) {
+        console.log("🛡️ PROMPT INJECTION SHIELD: Monitored Portal active. Enabling Scuttle-Block.");
         // Monitor for background scripts trying to modify the input area
         const inputs = document.querySelectorAll('textarea, [contenteditable="true"]');
         inputs.forEach(input => {

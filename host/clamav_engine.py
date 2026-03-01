@@ -50,9 +50,19 @@ _NETWORK_TIMEOUT = 15           # Limit for API/Fetch (seconds)
 _MAX_CONTAINER_FILES = 500      # Max files in an archive to prevent ZIP bombs
 _MAX_CONTAINER_UNCOMPRESSED_SIZE = 100 * 1024 * 1024 # 100 MB max uncompressed size for archives
 
-# Thread-safe locks
-_output_lock = threading.Lock()
 _config_lock = threading.Lock()
+_output_lock = threading.Lock()
+
+# Global Caches (Initialized as None)
+_url_cache = None
+_url_domain_cache = None
+_cache_last_loaded = 0
+
+_phish_cache = None
+_phish_last_loaded = 0
+
+_whitelist_cache = None
+_whitelist_last_loaded = 0
 
 # Multi-Core Engines
 # Security: max_workers is explicitly capped to prevent resource exhaustion
@@ -1011,11 +1021,10 @@ def check_on_access_status():
         log_debug(f"On-Access check error: {e}")
         return "unknown"
 
-_url_cache = None
-_cache_last_loaded = 0
+# Logic to interact with locally cached intelligence databases
 
 def load_url_cache(force=False):
-    global _url_cache, _cache_last_loaded
+    global _url_cache, _url_domain_cache, _cache_last_loaded
     run_dir = get_run_dir()
     base_path = os.path.join(run_dir, "urldb.txt")
     old_path = base_path + ".old"
@@ -1029,18 +1038,27 @@ def load_url_cache(force=False):
         return True
 
     try:
+        log_debug("Loading URL Database into memory (Heuristic & Exact)...")
         new_cache = set()
+        new_domain_cache = set()
         with open(target_path, "r") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     new_cache.add(line)
+                    # Malware Domain extraction for broader coverage
+                    try:
+                        domain = urlparse(line).netloc.lower()
+                        if domain: new_domain_cache.add(domain)
+                    except Exception:
+                        pass
         _url_cache = new_cache
+        _url_domain_cache = new_domain_cache
         _cache_last_loaded = mtime
         return True
     except (OSError, IOError):
         return False
-_phish_last_loaded = 0
+# Logic for Mitchell Krog's phishing domain database
 
 def load_phish_cache(force=False):
     global _phish_cache, _phish_last_loaded
@@ -1066,8 +1084,7 @@ def load_phish_cache(force=False):
     except (OSError, IOError):
         return False
 
-_whitelist_cache = None
-_whitelist_last_loaded = 0
+# Logic for Global Whitelist matching
 
 def load_whitelist_cache(force=False):
     global _whitelist_cache, _whitelist_last_loaded
@@ -1278,7 +1295,7 @@ def check_url_reputation(url):
         target_lower = target.lower()
         
         # A. Testing Payloads
-        if "malware.wicar.org" in target_lower or "/eicar.com" in target_lower or "eicar.org/download" in target_lower:
+        if "wicar.org" in target_lower or "/eicar.com" in target_lower or "eicar.org/download" in target_lower:
             return {"status": "malicious", "threat": _("Testing Payload (Safe Simulated Threat)"), "url": target}
 
         # B. Homograph Attack Detection (Heuristic)
@@ -1288,8 +1305,17 @@ def check_url_reputation(url):
 
         # C. URLhaus Malware Check (Confirmed)
         load_url_cache()
-        if _url_cache is not None and target in _url_cache:
-            return {"status": "malicious", "threat": _("URLhaus Malware Blocklist"), "url": target, "confirmed": True}
+        if _url_cache is not None:
+            if target in _url_cache:
+                return {"status": "malicious", "threat": _("URLhaus Malware Blocklist (Exact)"), "url": target, "confirmed": True}
+            
+            # Domain-level fallback (Secondary Layer)
+            try:
+                domain = urlparse(target).netloc.lower()
+                if _url_domain_cache and domain in _url_domain_cache:
+                    return {"status": "malicious", "threat": _("URLhaus Malware Blocklist (Domain-Match)"), "url": target, "confirmed": True}
+            except Exception:
+                pass
 
         # D. Phishing.Database (Mitchell Krog) Check (Confirmed)
         if check_phishing_db(target):

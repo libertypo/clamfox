@@ -157,6 +157,7 @@ chmod 644 "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null 
 # 6. Global Registration
 echo "📋 Cleaning up conflicting local manifests..."
 # Aggressively remove any user-local or profile-specific manifests that might override the global one
+USER_HOME=$(eval echo "~$ACTUAL_USER")
 find "$USER_HOME/.mozilla" -name "$MANIFEST_FILE" -exec rm -f {} + 2>/dev/null || true
 
 echo "📋 Registering Native Messaging Host globally..."

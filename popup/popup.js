@@ -617,19 +617,27 @@ async function checkEngine() {
         retryBtn.style.width = "100%";
         retryBtn.onclick = async () => {
             retryBtn.disabled = true;
-            retryBtn.textContent = "Connecting...";
+            const originalText = retryBtn.textContent;
+            retryBtn.textContent = browser.i18n.getMessage("connecting") || "Connecting...";
+
             try {
                 const res = await browser.runtime.sendMessage({ action: "proxy_reconnect" });
                 if (res.status === "ok") {
-                    window.location.reload();
+                    // Success: Clear warning and re-check engine immediately
+                    warning.style.display = "none";
+                    warning.textContent = "";
+                    await checkEngine();
                 } else {
-                    alert("Reconnection failed: " + res.error);
+                    const errMsg = res.error || "Unknown Error";
+                    alert(browser.i18n.getMessage("reconnectFailed", [errMsg]) || `Reconnection failed: ${errMsg}`);
+                    retryBtn.disabled = false;
+                    retryBtn.textContent = originalText;
                 }
             } catch (e) {
-                alert("Communication error with background script.");
+                alert(browser.i18n.getMessage("hostError") || "Communication error with background script.");
+                retryBtn.disabled = false;
+                retryBtn.textContent = originalText;
             }
-            retryBtn.disabled = false;
-            retryBtn.textContent = "Verify & Reconnect";
         };
         warning.appendChild(retryBtn);
 

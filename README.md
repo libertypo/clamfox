@@ -10,7 +10,7 @@ ClamFox now supports a **Dual-Mode** deployment:
 - **EDR Atomic Locking**: Downloads are physically sealed (`chmod 000`) at the OS level until verified clean.
 - **Hardware-Level Scaling**: Multi-core parallel container analysis (ISO/VHD/ZIP) using `ProcessPoolExecutor`.
 - **Privacy First**: Conditional forensic encryption for "Community Burns" (active when no VPN/Tor is detected).
-- **Prompt Shielding**: Defense against background prompt injection in LLM portals.
+- **Prompt Shielding**: Defense against background prompt injection in Chat & Productivity portals.
 
 ## 🚀 Installation
 
