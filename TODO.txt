@@ -1,40 +1,31 @@
 # ClamFox — Advanced Hardening Roadmap (v0.0.6.x)
 
-This roadmap outlines the next frontier of defensive engineering for ClamFox, focusing on cryptographic integrity, ML-driven heuristics, and zero-knowledge privacy.
-
-## 🚀 ACTIVE RESEARCH & IMPLEMENTATION
-
-### 1. INTELLIGENCE & DETECTION (STATISTICAL-FIRST)
-
 ### 2. CRYPTOGRAPHIC HARDENING
-- [ ] **Intelligence "Time-Lock"**: Require signed timestamps in `urldb.txt` to prevent "Freeze Attacks" (where an attacker prevents updates to keep a stale, vulnerable database in memory).
-- [ ] **Zero-Knowledge Whitelisting**: Transition `trust_db.json` to a salted-hash format. The host script should be able to verify a "Member of Trusted Set" proof without ever seeing the cleartext domain name.
-- [ ] **Supply-Chain Canaries**: Implement runtime integrity checksums for all loaded `.py` modules. The bridge will re-verify its own code-segment hashes at random intervals to detect "Hot-Patching" or memory injection.
+- [ ] Implement runtime integrity checksums for all loaded `.py` modules. The bridge will re-verify its own code-segment hashes at random intervals to detect "Hot-Patching" or memory injection.
 
 ### 3. ADVANCED DEFENSE-IN-DEPTH (Hardening)
-- [ ] **Memory-Safe Migration (Rust)**: Rewrite critical Native Messaging and TPM unsealing logic in Rust to eliminate memory-safety vulnerabilities (buffer overflows, use-after-free) inherent in high-performance C/Python glue.
-- [ ] **Kernel-Level Integrity (FS-Verity)**: Implement `FS-Verity` or advanced AppArmor profile enforcement to ensure signatures and blocks have not been tampered with by other local processes between check and load.
-- [ ] **System-Level Sandboxing**: Transition from standard execution to a restricted `bubblewrap` or `cgroup` container for the native host, enforcing strict "Need-to-Know" access to the filesystem.
-- [ ] **WASM Logic Offloading**: Port high-speed matching and homograph logic to WebAssembly. This allows critical checks to run inside the browser's sandbox, reducing the attack surface exposed to the native bridge.
+- [ ] Rewrite critical Native Messaging and TPM unsealing logic in Rust to eliminate memory-safety vulnerabilities (buffer overflows, use-after-free) inherent in high-performance C/Python glue.(tough one)
+- [ ] Implement `FS-Verity` or advanced AppArmor profile enforcement to ensure signatures and blocks have not been tampered with by other local processes between check and load.
+- [ ] Transition from standard execution to a restricted `bubblewrap` or `cgroup` container for the native host, enforcing strict "Need-to-Know" access to the filesystem.
+- [ ] Port high-speed matching and homograph logic to WebAssembly. This allows critical checks to run inside the browser's sandbox, reducing the attack surface exposed to the native bridge.
 
 
 ---
 
 ## ✅ BASELINE ACHIEVEMENTS (v0.0.5.9 Standard)
-- [x] **Hardware-Anchored Integrity**: TPM 2.0 / P-256 ECDSA Sealing (ERT).
-- [x] **Native Handshake**: Secure session key rotation with honeypot decoys.
-- [x] **Behavioral Shield**: Keylogger detection, DOM anomaly protection, and Visual spoofing detectors.
-- [x] **Privacy Tunnel**: Tor/Socks5 update routing and Canvas/WebGL poisoning.
-- [x] **Secure Installer**: SHA-256 Integrity verification during cross-filesystem deployment.
-- [x] **Statistical DGA Shield**: Shannon Entropy & N-Gram robotic domain detection.
-- [x] **k-Anonymity Cloud Shield**: Privacy-preserving global threat lookups.
-- [x] **Certificate Transparency Shield**: New-domain phishing detection via CT logs.
-- [x] **EC-DSA Log Shield**: Authenticated log encryption with machine-bound keys.
-- [x] **Intelligence Time-Lock**: Anti-Freeze protection for threat databases.
-- [x] **Zero-Knowledge whitelist**: Privacy-first trusted domain storage.
+- [x] TPM 2.0 / P-256 ECDSA Sealing (ERT).
+- [x] Secure session key rotation with honeypot decoys.
+- [x] Keylogger detection, DOM anomaly protection, and Visual spoofing detectors.
+- [x] Tor/Socks5 update routing and Canvas/WebGL poisoning.
+- [x] SHA-256 Integrity verification during cross-filesystem deployment.
+- [x] Shannon Entropy & N-Gram robotic domain detection.
+- [x] Privacy-preserving global threat lookups.
+- [x] New-domain phishing detection via CT logs.
+- [x] Authenticated log encryption with machine-bound keys.
+- [x] Anti-Freeze protection for threat databases.
+- [x] Privacy-first trusted domain storage.
 
 ==================================================
 Updated: 2026-03-01
 Build Version: 0.0.6.5
-Status: Production Hardened
 ==================================================
