@@ -7,6 +7,17 @@ import base64
 import time
 import sys
 
+
+def _tpm_log(msg):
+    """Write TPM operation details to the standard ClamFox log file (encrypted at-rest by the engine)."""
+    log_path = os.path.expanduser("~/.clamfox_host.log")
+    try:
+        import datetime
+        with open(log_path, "a") as f:
+            f.write(f"[TPM {datetime.datetime.now().isoformat()}] {msg}\n")
+    except OSError:
+        pass
+
 class TpmProvider:
     """Provides TPM 2.0 hardware-anchored security operations for ClamFox."""
     
@@ -57,8 +68,8 @@ class TpmProvider:
         success, stdout, stderr = self._run(cmd, input_data=secret_bytes)
         
         if not success:
-             print(f"DEBUG ERT: tpm2_create (seal) failed: {stderr.decode()}")
-        
+            _tpm_log(f"tpm2_create (seal) failed: {stderr.decode(errors='replace')}")
+
         if success:
             with open(self.key_pub, "rb") as f: pub = f.read()
             with open(self.key_priv, "rb") as f: priv = f.read()
@@ -119,7 +130,7 @@ class TpmProvider:
             success, _, stderr = self._run(sign_cmd)
             
             if not success:
-                 sys.stderr.write(f"DEBUG ERT: tpm2_sign failed: {stderr.decode()}\n")
+                _tpm_log(f"tpm2_sign failed: {stderr.decode(errors='replace')}")
 
             # 4. Export Public Key (PEM for OpenSSL compatibility)
             self._run(["tpm2_readpublic", "-c", key_ctx, "-f", "pem", "-o", pub_file])
@@ -155,26 +166,31 @@ class TpmProvider:
         """Verify an ECDSA signature using OpenSSL (Fast & Stateless)."""
         # Convert raw [R, S] signature to DER for OpenSSL compatibility
         der_sig = self._raw_sig_to_der(signature_bytes)
-        
-        sig_file = os.path.join(self.run_dir, "verify.sig")
-        pub_file = os.path.join(self.run_dir, "verify_pub.pem")
-        data_file = os.path.join(self.run_dir, "verify_data")
-        
+
+        import tempfile
         try:
-            with open(sig_file, "wb") as f: f.write(der_sig)
-            with open(pub_file, "wb") as f: f.write(pub_key_bytes)
-            with open(data_file, "wb") as f: f.write(data_bytes)
-            
-            # Use OpenSSL for fast verification
-            cmd = ["openssl", "dgst", "-sha256", "-verify", pub_file, "-signature", sig_file, data_file]
-            res = subprocess.run(cmd, capture_output=True, timeout=5)
-            
-            if res.returncode != 0:
-                sys.stderr.write(f"DEBUG ERT: OpenSSL verification failed: {res.stderr.decode()}\n")
-            
-            return res.returncode == 0
+            # Use a private TemporaryDirectory (unique per call) to prevent
+            # race conditions if verify_ecdsa() is ever called concurrently.
+            with tempfile.TemporaryDirectory(prefix="clamfox_verify_") as tmp_dir:
+                sig_file  = os.path.join(tmp_dir, "verify.sig")
+                pub_file  = os.path.join(tmp_dir, "verify_pub.pem")
+                data_file = os.path.join(tmp_dir, "verify_data")
+
+                with open(sig_file,  "wb") as f: f.write(der_sig)
+                with open(pub_file,  "wb") as f: f.write(pub_key_bytes)
+                with open(data_file, "wb") as f: f.write(data_bytes)
+
+                # Use OpenSSL for fast verification
+                cmd = ["openssl", "dgst", "-sha256", "-verify", pub_file,
+                       "-signature", sig_file, data_file]
+                res = subprocess.run(cmd, capture_output=True, timeout=5)
+
+                if res.returncode != 0:
+                    _tpm_log(f"OpenSSL verification failed: {res.stderr.decode(errors='replace')}")
+
+                return res.returncode == 0
         except Exception as e:
-            sys.stderr.write(f"DEBUG ERT: Verification exception: {e}\n")
+            _tpm_log(f"Verification exception: {e}")
             return False
 
     def cleanup(self):

@@ -60,7 +60,9 @@ function isWhitelisted(hostname) {
 
 const activeDownloads = new Map();
 
-let HONEYPOT_SECRET = "H0n3yP0t@123!"; // Default fallback
+// Default fallback: a fresh random value per session so no attacker who
+// reads the source code can predict the honeypot secret.
+let HONEYPOT_SECRET = `cf_honey_${crypto.randomUUID()}`;
 let SESSION_HOST_SECRET = null; // Ephemeral Cryptographic Secret
 
 // Initialized via initBackground()

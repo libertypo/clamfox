@@ -24,6 +24,7 @@ from yara_sanitizer import YaraSanitizer
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 # Supply-Chain Canary (Injected at build time)
@@ -100,7 +101,8 @@ _process_pool = ProcessPoolExecutor(max_workers=min(os.cpu_count() or 2, 4))
 # Runtime Integrity Watchdog State
 _MODULE_SNAPSHOTS = {}
 _CRITICAL_MODULES = ["clamav_engine.py", "tpm_provider.py", "yara_sanitizer.py", "ert_signer.py"]
-_secret_issued = False # SECURITY: Only emit secret once per host execution
+_secret_issued = False       # SECURITY: Only emit secret once per host execution
+_secret_issued_lock = threading.Lock()  # Guards atomic check-and-set of _secret_issued
 
 def capture_runtime_snapshots():
     """Capture initial SHA-256 hashes of all critical host modules."""
@@ -307,14 +309,24 @@ def get_or_create_machine_key():
         return None
 
 def derive_aes_key(private_key):
-    """Derive a stable 256-bit symmetric key from the EC private key."""
+    """
+    Derive a stable 256-bit AES key from the EC private key using HKDF.
+    Uses a per-machine salt (UID-based) and an explicit info label so the
+    AES key material is domain-separated from the EC signing key material.
+    """
     if not private_key: return None
     try:
-        # Use the raw private number as entropy for derivation
         private_bytes = private_key.private_numbers().private_value.to_bytes(32, 'big')
-        digest = hashlib.sha256(private_bytes).digest()
-        return digest
-    except:
+        # Stable per-machine salt — avoids using the raw scalar as AES key directly
+        salt = hashlib.sha256(f"clamfox-salt-uid-{os.getuid()}".encode()).digest()
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            info=b"clamfox-aes-log-v1"
+        )
+        return hkdf.derive(private_bytes)
+    except Exception:
         return None
 
 def xor_buffer(data, key):
@@ -596,23 +608,43 @@ def check_tor_reachable():
             continue
     return False, None
 
+# Opsec: Rotate through realistic browser UAs for non-tunnelled fetches
+# to avoid fingerprinting ClamFox requests at the network level.
+_USER_AGENTS = [
+    "Mozilla/5.0 (X11; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.199 Safari/537.36",
+]
+
 def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=None):
     """Fetch URL with optional Tor/VPN routing and leak protection."""
-    cmd = ['curl', '-s', '-A', 'ClamFox-Native-Host/1.0', '-L', '--connect-timeout', '15']
-    
-    if headers:
-        for k, v in headers.items():
-            cmd.extend(['-H', f'{k}: {v}'])
-    
+    tunnelled = False
+
     if use_tunnel:
         tor_active, tor_port = check_tor_reachable()
         if tor_active:
-            cmd.extend(['--proxy', f'socks5h://127.0.0.1:{tor_port}'])
+            tunnelled = True
         else:
             vpn_active, __ = check_vpn_active()
-            if not vpn_active and _PRIVATE_TUNNEL_FORCE:
+            if vpn_active:
+                tunnelled = True
+            elif _PRIVATE_TUNNEL_FORCE:
                 log_debug(f"PRIVACY ABORT: Tunnel requested but no VPN/Tor found for {url}")
                 return False
+
+    # When tunnelled, keep the branded UA so servers can identify the client
+    # for policy purposes. When untunnelled, rotate to reduce fingerprinting.
+    user_agent = 'ClamFox-Native-Host/1.0' if tunnelled else random.choice(_USER_AGENTS)
+
+    cmd = ['curl', '-s', '-A', user_agent, '-L', '--connect-timeout', '15']
+
+    if headers:
+        for k, v in headers.items():
+            cmd.extend(['-H', f'{k}: {v}'])
+
+    if tunnelled and tor_active:
+        cmd.extend(['--proxy', f'socks5h://127.0.0.1:{tor_port}'])
 
     if post_data:
         for k, v in post_data.items():
@@ -627,10 +659,8 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
         return False
 
 def check_clamav():
-    log_debug("TRACE: check_clamav() entered")
     # Prefer clamdscan (Daemon) for performance, fallback to clamscan
-    log_debug(f"Environment PATH: {os.environ.get('PATH')}")
-    
+
     # Hardened resolution
     clamdscan_path = "/usr/bin/clamdscan" if os.path.exists("/usr/bin/clamdscan") else shutil.which("clamdscan")
     if clamdscan_path:
@@ -966,12 +996,12 @@ def update_intelligence(force=False):
         },
         {
             "name": "Maldet (LMD) MD5 Hashes",
-            "url": "http://www.rfxn.com/downloads/rfxn.hdb",
+            "url": "https://www.rfxn.com/downloads/rfxn.hdb",
             "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.hdb")
         },
         {
             "name": "Maldet (LMD) Hex Patterns",
-            "url": "http://www.rfxn.com/downloads/rfxn.ndb",
+            "url": "https://www.rfxn.com/downloads/rfxn.ndb",
             "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.ndb")
         }
     ]
@@ -1033,20 +1063,26 @@ def update_url_cache(force=False):
 
 def encrypt_payload(data):
     """
-    Symmetric encryption for forensics when no VPN/Tor is available.
-    In a production system, this would use a public PGP key for the destination.
-    For now, we use a derived key for demonstration of 'Encryption-at-Rest/Transit'.
+    AES-GCM encryption for forensics when no VPN/Tor is available.
+    Uses the per-machine EC-derived key (same as secure_log_encode) so each
+    installation produces a unique ciphertext — no shared community key.
     """
     if not data: return None
     try:
-        key = hashlib.sha256(b"CLAMFOX_COMMUNITY_BURN_SECRET").digest()
-        # Simple XOR cipher for demonstration (No external deps required)
-        encrypted = bytearray()
-        for i, byte in enumerate(data.encode('utf-8')):
-            encrypted.append(byte ^ key[i % len(key)])
-        import base64
-
-        return base64.b64encode(encrypted).decode('utf-8')
+        priv_key = get_or_create_machine_key()
+        aes_key = derive_aes_key(priv_key)
+        if not aes_key:
+            return None
+        iv = os.urandom(12)
+        encryptor = Cipher(
+            algorithms.AES(aes_key),
+            modes.GCM(iv)
+        ).encryptor()
+        ciphertext = encryptor.update(data.encode('utf-8')) + encryptor.finalize()
+        tag = encryptor.tag
+        # Package: IV(12) + Tag(16) + Ciphertext
+        combined = iv + tag + ciphertext
+        return base64.b64encode(combined).decode('utf-8')
     except Exception:
         return None
 
@@ -1326,9 +1362,8 @@ def check_on_access_status():
 # --- Intelligence Time-Lock (v0.6.x) ---
 
 _RELEASE_ROOT_PUB_KEY = """-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+Rz3xH6j3x9T8vWlqC6Oq7Y6x5Dk
-kU1Xl6v8t4Xh+FvU9mP/m8X6n3gU+mP6vWlqC6Oq7Y6x5DkkU1Xl6v8t4Xh+FvU
-9mP/mA==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEF4R7Cct0ZkGOZQTAGWQAOrmRvN5M
+Sfyo+iroUOto0DcviEmyzVe5y5CNrB0QfRQEeraeq/0PSI4jWCoe99ov5A==
 -----END PUBLIC KEY-----"""
 
 def verify_timelock(file_path):
@@ -1438,10 +1473,6 @@ def load_phish_cache(force=False):
     path = os.path.join(run_dir, "phishdb.txt")
     if not os.path.exists(path): return False
 
-    # CLAMFOX TIME-LOCK: Verify integrity and freshness
-    if not verify_timelock(path):
-        return False
-    
     # CLAMFOX TIME-LOCK: Verify integrity and freshness
     if not verify_timelock(path):
         return False
@@ -2506,6 +2537,15 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                         version_info = v_res.stdout.strip()
                     except: pass
 
+                # SECURITY: Atomically decide whether to include the real secret.
+                # We hold the lock while checking AND flipping the flag so that
+                # two concurrent 'check' dispatches cannot both see _secret_issued=False.
+                with _secret_issued_lock:
+                    should_emit_secret = (not _secret_issued and
+                                          (not received_secret or received_secret != secret))
+                    if should_emit_secret:
+                        _secret_issued = True
+
                 status_msg = {
                     "status": "ok" if installed else "missing",
                     "path": path,
@@ -2515,8 +2555,8 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                         "vpn": vpn_name if vpn_active else None,
                         "tor": tor_active
                     },
-                    "secret": secret if (not _secret_issued and (not received_secret or received_secret != secret)) else "****", 
-                    "honeypot_secret": hp_secret if (not _secret_issued or (received_secret and secret and received_secret == secret)) else "****",
+                    "secret": secret if should_emit_secret else "****",
+                    "honeypot_secret": hp_secret if (should_emit_secret or (received_secret and secret and received_secret == secret)) else "****",
                     "integrity_ok": (current_hash == stored_hash) if stored_hash else True,
                     "binary_ok": binary_ok,
                     "env_ok": verify_environment(),
@@ -2532,10 +2572,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 }
                 log_debug("CHECK ACTION COMPLETED")
                 send_message(status_msg)
-                
-                # SECURITY: Mark secret as issued so it's never sent again
-                if status_msg.get("secret") != "****":
-                    _secret_issued = True
+                # _secret_issued flag was already set atomically above under the lock
             except Exception as e:
                 log_debug(f"Internal Check error: {e}")
                 send_message({"status": "error", "error": f"Check logic failed: {e}"})
@@ -2544,7 +2581,17 @@ def handle_message(message, secret, config, stored_hash, current_hash):
             # Security: Session Key Rotation
             # Generates a new random secret, replaces the old one in the keyring and config,
             # and returns it to the extension. This limits the blast radius of any secret leak.
+            # Rate-limited to once per 60 seconds to prevent rapid secret cycling.
             try:
+                _ROTATION_COOLDOWN = 60  # seconds
+                last_rotation = config.get("last_rotation", 0)
+                elapsed = time.time() - last_rotation
+                if elapsed < _ROTATION_COOLDOWN:
+                    remaining = int(_ROTATION_COOLDOWN - elapsed)
+                    log_debug(f"Secret rotation rate-limited: {remaining}s remaining.")
+                    send_message({"status": "error", "error": f"Rate limited: wait {remaining}s before next rotation."})
+                    return
+
                 new_secret = secrets.token_urlsafe(32)
                 keyring_set("secret", new_secret)
                 config["secret"] = new_secret

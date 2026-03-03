@@ -250,7 +250,19 @@ cat <<EOF > "$POLICY_DIR/policies.json"
 }
 EOF
 
-# 9. Mandatory Access Control (AppArmor/SELinux) - FORGONE FOR COMPATIBILITY
+# 9. Mandatory Access Control (AppArmor/SELinux)
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠️  SECURITY RISK NOTICE (Audit finding L-4):
+#   AppArmor has been intentionally disabled for cross-distro compatibility.
+#   Without a MAC profile, a compromised clamav_engine.py process has full
+#   user-level filesystem access.
+#
+#   This trade-off was accepted by the project maintainer.
+#   To re-enable AppArmor in a future release:
+#     1. Restore host/clamfox.apparmor to /etc/apparmor.d/opt.clamfox.clamav_host
+#     2. Run: apparmor_parser -r /etc/apparmor.d/opt.clamfox.clamav_host
+#     3. Remove this removal block.
+# ─────────────────────────────────────────────────────────────────────────────
 echo "🛡️  Clearing legacy Mandatory Access Control (MAC) policies..."
 APPARMOR_PROFILE="/etc/apparmor.d/opt.clamfox.clamav_engine.py"
 if [ -f "$APPARMOR_PROFILE" ]; then

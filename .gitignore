@@ -54,3 +54,9 @@ __pycache__/
 # Editor artifacts
 .DS_Store
 *.swp
+
+# Release signing key — stored in OS keyring (NEVER commit to repo):
+#   Retrieve: secret-tool lookup application clamfox type release-signing-key key timelock_release_priv
+#   Store:    secret-tool store --label="ClamFox Timelock Release Signing Key" \
+#               application clamfox type release-signing-key key timelock_release_priv < key.pem
+host/timelock_release_priv.pem
