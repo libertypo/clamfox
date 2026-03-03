@@ -578,7 +578,7 @@ def check_vpn_active():
                             if state != 'down':
                                 log_debug(f"VPN detected via generic interface: {iface}")
                                 return True, f"VPN ({iface})"
-                    except: pass
+                    except Exception: pass
 
         # 2. Native IP Route Check (Detect default gateway on a tunnel)
         if os.path.exists('/proc/net/route'):
@@ -795,7 +795,7 @@ def quarantine_file(filepath):
         
         # 1. Strip all permissions BEFORE moving (Defense in depth)
         try: os.chmod(filepath, 0o000)
-        except: pass
+        except Exception: pass
         
         # 2. Atomic move with umask to prevent TOCTOU leakage
         old_umask = os.umask(0o777)
@@ -2195,7 +2195,7 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
     finally:
         if 'actual_path' in locals() and actual_path and os.path.exists(actual_path):
             try: os.chmod(actual_path, original_mode)
-            except: pass
+            except Exception: pass
 
 def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
     send_message({"status": "progress", "percent": 10, "msg": _("Preparing scan...")})
@@ -2229,7 +2229,7 @@ def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try: os.unlink(tmp_path)
-            except: pass
+            except Exception: pass
 
 def handle_message(message, secret, config, stored_hash, current_hash):
     try:
@@ -2556,7 +2556,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                     try:
                         v_res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=2)
                         version_info = v_res.stdout.strip()
-                    except: pass
+                    except Exception: pass
 
                 # SECURITY: Atomically decide whether to include the real secret.
                 # We hold the lock while checking AND flipping the flag so that
@@ -2645,7 +2645,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
         log_debug(f"CRITICAL BODY ERROR: {e}")
         try:
             send_message({"status": "error", "error": f"Internal Bridge Body Error: {e}"})
-        except: pass
+        except Exception: pass
 
 import signal
 

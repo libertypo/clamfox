@@ -28,7 +28,7 @@ class TpmProvider:
         self.run_dir = f"/run/user/{uid}/clamfox"
         if not os.path.exists(self.run_dir):
             try: os.makedirs(self.run_dir, mode=0o700, exist_ok=True)
-            except: self.run_dir = f"/tmp/clamfox_{uid}"
+            except Exception: self.run_dir = f"/tmp/clamfox_{uid}"
             
         self.primary_ctx = os.path.join(self.run_dir, "clamfox_primary.ctx")
         self.key_pub = os.path.join(self.run_dir, "clamfox_key.pub")
@@ -198,7 +198,7 @@ class TpmProvider:
         if os.path.exists(self.primary_ctx):
             self._run(["tpm2_flushcontext", self.primary_ctx])
             try: os.remove(self.primary_ctx)
-            except: pass
+            except Exception: pass
 
 if __name__ == "__main__":
     tpm = TpmProvider()
