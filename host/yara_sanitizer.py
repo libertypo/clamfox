@@ -76,7 +76,23 @@ class YaraSanitizer:
             
             cleaned_rules.append(full_rule.strip())
 
-        return "\n\n".join(cleaned_rules)
+        result = "\n\n".join(cleaned_rules)
+
+        # 5. LibClamAV Compatibility: Remove patterns the reference YARA parser
+        #    allows but LibClamAV's stricter parser rejects.
+        #    a) Empty string literals in any context (meta or strings section).
+        result = re.sub(r'(\b\w+\s*=\s*)""\s*\n', r'\1"N/A"\n', result)
+        result = re.sub(r"(\b\w+\s*=\s*)''\s*\n", r"\1'N/A'\n", result)
+        #    b) Identifiers used directly in condition before standard keywords
+        #       (a common YARA extension LibClamAV's grammar doesn't support).
+        result = re.sub(r'\bxor\s*\(', '(', result)  # xor modifier not supported
+        result = re.sub(r'\bbase64\s*\(', '(', result)  # base64 modifier not supported
+        result = re.sub(r'\bbase64wide\s*\(', '(', result)
+        result = re.sub(r'\b(\$\w+)\s+xor\b', r'\1', result)
+        result = re.sub(r'\b(\$\w+)\s+base64\b', r'\1', result)
+        result = re.sub(r'\b(\$\w+)\s+base64wide\b', r'\1', result)
+
+        return result
 
     def sync_from_url(self, url, filename, proxies=None, headers=None):
         """Downloads a YARA bundle, sanitizes it, and saves."""
