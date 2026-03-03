@@ -40,7 +40,7 @@ class TpmProvider:
         try:
             res = subprocess.run(["tpm2_getcap", "properties-fixed"], capture_output=True, timeout=2)
             return res.returncode == 0
-        except:
+        except Exception:
             return False
 
     def _run(self, cmd, input_data=None):
@@ -96,7 +96,7 @@ class TpmProvider:
             self._run(["tpm2_flushcontext", self.key_ctx])
             
             return stdout if success else None
-        except:
+        except Exception:
             return None
 
     def sign_ecdsa(self, data_bytes):

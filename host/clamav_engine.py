@@ -1143,10 +1143,10 @@ def submit_community_burn(target, threat_type, details):
         with open(burn_ledger, "w") as f:
             json.dump(data[-100:], f, indent=4) # Keep last 100 burns
             
-        # Write to system-wide audit log for transparency
+        # Write to system-wide audit log — encrypted like all other entries
         log_path = os.path.expanduser("~/.clamfox_host.log")
         with open(log_path, "a") as f:
-            f.write(f"[{time.ctime()}] THREAT NEUTRALIZED: Community Burn triggered for {sharable_target}\n")
+            f.write(secure_log_encode(f"[{time.ctime()}] THREAT NEUTRALIZED: Community Burn triggered for {sharable_target}") + "\n")
             
         return True
     except Exception as e:
@@ -2669,11 +2669,22 @@ def cleanup_stale_quarantine():
                 
                 # If a file has been stuck here for more than 1 hour
                 if os.path.getmtime(filepath) < now - 3600:
-                    log_debug(f"Crash Trap: Recovering abandoned quarantine {filename}")
-                    os.chmod(filepath, 0o644) # Unlock
-                    safe_dest = os.path.join(downloads_dir, filename)
-                    import shutil
-                    shutil.move(filepath, safe_dest) # Evict
+                    # SECURITY: Files with .quarantine suffix are confirmed-infected by ClamAV.
+                    # Restoring them to Downloads would silently re-expose the malware.
+                    # Delete them instead; user can retrieve from ClamFox if needed.
+                    if filename.endswith('.quarantine'):
+                        log_debug(f"Crash Trap: Deleting stale confirmed-infected quarantine file: {filename}")
+                        try:
+                            os.remove(filepath)
+                        except OSError as e:
+                            log_debug(f"Failed to remove stale quarantine file {filename}: {e}")
+                    else:
+                        # Stale lock (000-permission) on a non-infected file — restore it
+                        log_debug(f"Crash Trap: Recovering abandoned stale lock {filename}")
+                        os.chmod(filepath, 0o644)
+                        safe_dest = os.path.join(downloads_dir, filename)
+                        import shutil
+                        shutil.move(filepath, safe_dest)
 
         # 2. Recover files stuck in Download with 000 permissions (Stale Locks)
         if os.path.exists(downloads_dir):

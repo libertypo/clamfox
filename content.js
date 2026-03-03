@@ -251,7 +251,10 @@ async function deployHoneypots(hvtData) {
     const fakePass = document.createElement('input');
     fakePass.type = 'password';
     fakePass.name = 'password';
-    fakePass.value = hvtData.honeypot_secret || 'H0n3yP0t@123!';
+    // Use session secret from background, or generate a random per-tab fallback.
+    // Never fall back to a predictable literal — an attacker reading the source
+    // would know exactly what value to avoid.
+    fakePass.value = hvtData.honeypot_secret || `cf_honey_${crypto.randomUUID()}`;
 
     trapDiv.appendChild(fakeBtc);
     trapDiv.appendChild(fakePass);
