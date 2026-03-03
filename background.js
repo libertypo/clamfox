@@ -563,8 +563,9 @@ browser.webRequest.onBeforeRequest.addListener(
         }
 
         // Exfiltration Heuristic: Catching our own honeypots leaving the network
+        // Only the live session secret (HONEYPOT_SECRET, random per session) and the
+        // static crypto-address decoy are checked — the old hardcoded literal has been removed.
         const isExfiltratingHoneypot = (HONEYPOT_SECRET && bodyString.includes(HONEYPOT_SECRET)) ||
-            bodyString.includes('H0n3yP0t@123!') ||
             bodyString.includes('bc1qza6h7u3w2qj4z58y8z7a90b4d4z4cx9m2mz6z');
 
         if (isExfiltratingHoneypot) {

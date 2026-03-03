@@ -1648,9 +1648,17 @@ def check_cloud_reputation(url):
         if now - cached_time < 3600: # 1 hour cache
             return result, "Cloud Intelligence (Cached)"
 
-    # Security: Force Tor/VPN for cloud queries
-    temp_resp = f"/tmp/cloud_check_{prefix}_{os.getuid()}.json"
-    
+    # Use a private temp file in the per-user run dir to avoid /tmp TOCTOU/symlink attacks
+    import tempfile
+    try:
+        tmp_fd = tempfile.NamedTemporaryFile(
+            delete=False, dir=get_run_dir(), prefix="cloud_check_", suffix=".json"
+        )
+        temp_resp = tmp_fd.name
+        tmp_fd.close()
+    except OSError:
+        return False, None
+
     cloud_url = f"https://threat-intel.clamfox.org/v1/prefix/{prefix}"
     
     try:
@@ -1691,7 +1699,16 @@ def check_certificate_age(domain):
     if domain in _ct_cache:
         return _ct_cache[domain]
 
-    temp_resp = f"/tmp/ct_audit_{domain}_{os.getuid()}.json"
+    # Use a private temp file in the per-user run dir to avoid /tmp TOCTOU/symlink attacks
+    import tempfile
+    try:
+        tmp_fd = tempfile.NamedTemporaryFile(
+            delete=False, dir=get_run_dir(), prefix="ct_audit_", suffix=".json"
+        )
+        temp_resp = tmp_fd.name
+        tmp_fd.close()
+    except OSError:
+        return None
     ct_url = f"https://crt.sh/?q={domain}&output=json"
     
     try:
@@ -1742,9 +1759,9 @@ def hash_domain_for_whitelist(domain):
         priv_key = get_or_create_machine_key()
         if not priv_key: return None
         
-        # Use the raw private key bytes as the salt
-        # We derive a stable salt from the private number
-        salt = priv_key.private_numbers().private_value.to_bytes(32, 'big')
+        # Derive a domain-specific salt — add context to separate this from key derivation uses
+        raw_scalar = priv_key.private_numbers().private_value.to_bytes(32, 'big')
+        salt = hashlib.sha256(raw_scalar + b"clamfox-zk-domain-salt-v1").digest()
         
         # Hash(domain + salt)
         hasher = hashlib.sha256()
