@@ -81,8 +81,8 @@ class YaraSanitizer:
     def sync_from_url(self, url, filename, proxies=None, headers=None):
         """Downloads a YARA bundle, sanitizes it, and saves."""
         try:
-            print(f"Fetching YARA signatures from {url}...")
-            # Use streaming to prevent OOM on massive files
+            # No print() here — caller is clamav_engine.py which owns the native
+            # messaging stdout pipe; writing outside _output_lock would corrupt it.
             response = requests.get(url, timeout=60, proxies=proxies, headers=headers, stream=True)
             if response.status_code != 200:
                 return False, f"HTTP {response.status_code}"

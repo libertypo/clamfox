@@ -450,8 +450,11 @@ def get_message():
             return None
             
         message = payload.decode('utf-8')
-        log_debug(f"Payload: {message}")
-        return json.loads(message)
+        parsed = json.loads(message)
+        # Data minimisation: log only action + rough target size, never full payload
+        log_debug(f"Payload received: action={parsed.get('action', '?')}, "
+                  f"target_len={len(str(parsed.get('target', '')))}b")
+        return parsed
     except Exception as e:
         log_debug(f"Payload Error: {e}")
         return None
