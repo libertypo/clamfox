@@ -237,12 +237,17 @@ def try_opportunistic_sandboxing():
 
 # Security: Resolve external tool paths at startup to prevent
 # PATH hijacking attacks. Use absolute paths for production reliability.
-_BIN_FILE     = "/usr/bin/file" if os.path.exists("/usr/bin/file") else shutil.which("file")
-_BIN_7Z       = "/usr/bin/7z" if os.path.exists("/usr/bin/7z") else shutil.which("7z")
-_BIN_FRESHCLAM = "/usr/bin/freshclam" if os.path.exists("/usr/bin/freshclam") else shutil.which("freshclam")
-_BIN_WL_PASTE = shutil.which("wl-paste")
-_BIN_XCLIP    = shutil.which("xclip")
-_BIN_SYSTEMCTL = "/usr/bin/systemctl" if os.path.exists("/usr/bin/systemctl") else shutil.which("systemctl")
+def _resolve_bin(bin_name, primary_path):
+    if os.path.exists(primary_path) and os.access(primary_path, os.X_OK):
+        return primary_path
+    return shutil.which(bin_name)
+
+_BIN_FILE      = _resolve_bin("file", "/usr/bin/file")
+_BIN_7Z        = _resolve_bin("7z", "/usr/bin/7z")
+_BIN_FRESHCLAM = _resolve_bin("freshclam", "/usr/bin/freshclam")
+_BIN_WL_PASTE  = shutil.which("wl-paste")
+_BIN_XCLIP     = shutil.which("xclip")
+_BIN_SYSTEMCTL = _resolve_bin("systemctl", "/usr/bin/systemctl")
 
 import itertools
 import base64
@@ -625,19 +630,21 @@ def check_clamav():
     log_debug("TRACE: check_clamav() entered")
     # Prefer clamdscan (Daemon) for performance, fallback to clamscan
     log_debug(f"Environment PATH: {os.environ.get('PATH')}")
-    clamdscan_path = shutil.which("clamdscan")
+    
+    # Hardened resolution
+    clamdscan_path = "/usr/bin/clamdscan" if os.path.exists("/usr/bin/clamdscan") else shutil.which("clamdscan")
     if clamdscan_path:
         log_debug(f"Detected ClamD: {clamdscan_path}")
         return True, clamdscan_path, True
         
-    clamscan_path = shutil.which("clamscan")
+    clamscan_path = "/usr/bin/clamscan" if os.path.exists("/usr/bin/clamscan") else shutil.which("clamscan")
     if clamscan_path:
         log_debug(f"Detected ClamScan: {clamscan_path}")
         return True, clamscan_path, False
         
     log_debug("ClamAV binaries not found in PATH")
     # Search common paths manually if PATH is restricted
-    fallbacks = ["/usr/bin/clamscan", "/usr/local/bin/clamscan", "/usr/bin/clamdscan"]
+    fallbacks = ["/usr/local/bin/clamscan", "/usr/bin/clamdscan"] # /usr/bin already checked above
     for fb in fallbacks:
         if os.path.exists(fb) and os.access(fb, os.X_OK):
             log_debug(f"Detected ClamAV via fallback: {fb}")
