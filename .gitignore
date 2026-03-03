@@ -1,8 +1,12 @@
+# Rust / WASM Build Artifacts
+wasm-shield/target/
+wasm_shield/*.wasm
+
 # Secrets & Local State
 host/config.json
-host/urldb.txt
-host/phishdb.txt
-host/whitelistdb.txt
+host/urldb.txt*
+host/phishdb.txt*
+host/whitelistdb.txt*
 host/host_debug.log
 host/alert_log.txt
 host/tpm_debug.err
@@ -17,6 +21,8 @@ host/verify.sig
 host/verify_digest
 host/verify_pub
 host/trust_db.json
+host/vault_pub.pem
+
 # Build Artifacts / Distribution Packages
 *.xpi
 *.zip
@@ -24,6 +30,8 @@ build_full/
 build_amo/
 build_xpi_full/
 build_xpi_standalone/
+clamfox_full_*/
+clamfox_standalone_*/
 clamfox_amo_*/
 
 # Old snapshot directories
@@ -36,6 +44,7 @@ da974eebe6414d4987d9*.zip
 test_ram.py
 test_script.js
 test_update.py
+/tmp/test_sandboxing.py
 
 # Python
 __pycache__/

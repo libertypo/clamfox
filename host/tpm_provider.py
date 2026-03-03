@@ -92,41 +92,46 @@ class TpmProvider:
         """Generate a transient ECDSA key, sign data, and return (signature, public_key_pem)."""
         if not self.tpm_present: return None, None
         
-        sig_file = os.path.join(self.run_dir, "clamfox.sig")
-        pub_file = os.path.join(self.run_dir, "clamfox_pub.pem")
-        
-        # 1. Create Transient ECDSA Key
-        create_cmd = ["tpm2_create", "-C", self.primary_ctx, "-G", "ecc", "-u", self.key_pub, "-r", self.key_priv]
-        if not self._run(create_cmd)[0]: return None, None
-        
-        # 2. Load Key
-        load_cmd = ["tpm2_load", "-C", self.primary_ctx, "-u", self.key_pub, "-r", self.key_priv, "-c", self.key_ctx]
-        if not self._run(load_cmd)[0]: return None, None
-        
-        # 3. Sign (Pre-hash to avoid TPM timeouts on large files)
-        digest = hashlib.sha256(data_bytes).digest()
-        digest_file = os.path.join(self.run_dir, "digest_to_sign")
-        with open(digest_file, "wb") as f:
-            f.write(digest)
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="clamfox_sign_") as tmp_dir:
+            sig_file = os.path.join(tmp_dir, "clamfox.sig")
+            pub_file = os.path.join(tmp_dir, "clamfox_pub.pem")
+            key_pub = os.path.join(tmp_dir, "clamfox_key.pub")
+            key_priv = os.path.join(tmp_dir, "clamfox_key.priv")
+            key_ctx = os.path.join(tmp_dir, "clamfox_key.ctx")
             
-        # Use -d to indicate input is already a digest, -f plain for raw signature
-        sign_cmd = ["tpm2_sign", "-c", self.key_ctx, "-g", "sha256", "-d", "-f", "plain", "-o", sig_file, digest_file]
-        success, _, stderr = self._run(sign_cmd)
-        
-        if not success:
-             sys.stderr.write(f"DEBUG ERT: tpm2_sign failed: {stderr.decode()}\n")
+            # 1. Create Transient ECDSA Key
+            create_cmd = ["tpm2_create", "-C", self.primary_ctx, "-G", "ecc", "-u", key_pub, "-r", key_priv]
+            if not self._run(create_cmd)[0]: return None, None
+            
+            # 2. Load Key
+            load_cmd = ["tpm2_load", "-C", self.primary_ctx, "-u", key_pub, "-r", key_priv, "-c", key_ctx]
+            if not self._run(load_cmd)[0]: return None, None
+            
+            # 3. Sign (Pre-hash to avoid TPM timeouts on large files)
+            digest = hashlib.sha256(data_bytes).digest()
+            digest_file = os.path.join(tmp_dir, "digest_to_sign")
+            with open(digest_file, "wb") as f:
+                f.write(digest)
+                
+            # Use -d to indicate input is already a digest, -f plain for raw signature
+            sign_cmd = ["tpm2_sign", "-c", key_ctx, "-g", "sha256", "-d", "-f", "plain", "-o", sig_file, digest_file]
+            success, _, stderr = self._run(sign_cmd)
+            
+            if not success:
+                 sys.stderr.write(f"DEBUG ERT: tpm2_sign failed: {stderr.decode()}\n")
 
-        # 4. Export Public Key (PEM for OpenSSL compatibility)
-        self._run(["tpm2_readpublic", "-c", self.key_ctx, "-f", "pem", "-o", pub_file])
-        
-        if success:
-            with open(sig_file, "rb") as f: sig = f.read()
-            with open(pub_file, "rb") as f: pub = f.read()
+            # 4. Export Public Key (PEM for OpenSSL compatibility)
+            self._run(["tpm2_readpublic", "-c", key_ctx, "-f", "pem", "-o", pub_file])
             
-            # 5. FLUSH/BURN the key context immediately
-            self._run(["tpm2_flushcontext", self.key_ctx])
-            
-            return sig, pub
+            if success:
+                with open(sig_file, "rb") as f: sig = f.read()
+                with open(pub_file, "rb") as f: pub = f.read()
+                
+                # 5. FLUSH/BURN the key context immediately
+                self._run(["tpm2_flushcontext", key_ctx])
+                
+                return sig, pub
         return None, None
 
     def _raw_sig_to_der(self, raw_sig):
@@ -192,3 +197,4 @@ if __name__ == "__main__":
             tpm.cleanup()
     else:
         print("❌ TPM 2.0 not available.")
+

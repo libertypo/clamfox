@@ -149,8 +149,9 @@ async function initSettings() {
         remindersEnabled: true,
         autoSyncEnabled: true,
         autoBurnEnabled: false,
-        promptInjectionShieldEnabled: true,
-        suppressTrustedToasts: true
+        commandShieldEnabled: true,
+        suppressTrustedToasts: true,
+        strictMode: false
     });
 
     freqSlider.value = settings.scanFrequencyMB;
@@ -195,11 +196,11 @@ async function initSettings() {
         });
     }
 
-    const promptInjectionShieldToggle = document.getElementById('prompt-injection-shield-toggle');
-    if (promptInjectionShieldToggle) {
-        promptInjectionShieldToggle.checked = settings.promptInjectionShieldEnabled;
-        promptInjectionShieldToggle.addEventListener('change', () => {
-            browser.storage.local.set({ promptInjectionShieldEnabled: promptInjectionShieldToggle.checked });
+    const commandShieldToggle = document.getElementById('command-injection-shield-toggle');
+    if (commandShieldToggle) {
+        commandShieldToggle.checked = settings.commandShieldEnabled;
+        commandShieldToggle.addEventListener('change', () => {
+            browser.storage.local.set({ commandShieldEnabled: commandShieldToggle.checked });
         });
     }
 
@@ -208,6 +209,14 @@ async function initSettings() {
         suppressToastsToggle.checked = settings.suppressTrustedToasts || false;
         suppressToastsToggle.addEventListener('change', () => {
             browser.storage.local.set({ suppressTrustedToasts: suppressToastsToggle.checked });
+        });
+    }
+
+    const strictModeToggle = document.getElementById('strict-mode-toggle');
+    if (strictModeToggle) {
+        strictModeToggle.checked = settings.strictMode || false;
+        strictModeToggle.addEventListener('change', () => {
+            browser.storage.local.set({ strictMode: strictModeToggle.checked });
         });
     }
 

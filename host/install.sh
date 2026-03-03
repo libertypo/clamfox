@@ -100,6 +100,8 @@ if [ -d "$DIR/locales" ]; then
     cp -r "$DIR/locales/"* "$INSTALL_DIR/locales/"
 fi
 if [ -d "$DIR/signatures" ]; then
+    # Security: Clean up signatures in target to avoid legacy AV-blocked files
+    rm -f "$INSTALL_DIR/signatures/"*.hdb "$INSTALL_DIR/signatures/"*.ndb "$INSTALL_DIR/signatures/"*.old "$INSTALL_DIR/signatures/"*.tmp
     cp -r "$DIR/signatures/"* "$INSTALL_DIR/signatures/"
 fi
 
@@ -153,6 +155,23 @@ chmod 755 "$INSTALL_DIR/signatures"
 chmod 644 "$INSTALL_DIR/urldb.txt" 2>/dev/null || touch "$INSTALL_DIR/urldb.txt" && chmod 644 "$INSTALL_DIR/urldb.txt"
 chown "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/urldb.txt" "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null || true
 chmod 644 "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null || true
+
+# 5.5 Supply-Chain Canary Provisioning
+echo "🛡️  Planting Supply-Chain Canary..."
+CANARY_FILE="$INSTALL_DIR/signatures/.canary"
+echo "ClamFox Genuine Build: $(date)" > "$CANARY_FILE"
+chmod 644 "$CANARY_FILE"
+chown root:root "$CANARY_FILE"
+
+# 5.6 FS-Verity Kernel Integrity (Optional/Opportunistic)
+if command -v fsverity >/dev/null 2>&1; then
+    echo "🛡️  FS-VERITY: Detecting Kernel support for Immutability..."
+    for f in "$INSTALL_DIR/clamav_engine.py" "$INSTALL_DIR/tpm_provider.py" "$INSTALL_DIR/yara_sanitizer.py"; do
+        if [ -f "$f" ]; then
+             fsverity enable "$f" 2>/dev/null && echo "   [OK] Kernel-level lock active for $(basename "$f")" || echo "   [SKIP] Storage/Kernel does not support verity for $(basename "$f")"
+        fi
+    done
+fi
 
 # 6. Global Registration
 echo "📋 Cleaning up conflicting local manifests..."

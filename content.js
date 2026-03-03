@@ -12,16 +12,30 @@ document.addEventListener("contextmenu", (event) => {
     lastClickedElement = event.target;
 }, true);
 
+/**
+ * Domain Match Helper (Handles subdomains and wildcard checks)
+ */
+function isDomainMatch(target) {
+    if (typeof getBaseDomain === 'undefined') {
+        // Fallback if psl_data.js failed to load
+        const current = window.location.hostname.toLowerCase();
+        const targetLow = target.toLowerCase();
+        return current === targetLow || current.endsWith("." + targetLow);
+    }
+    const currentBase = getBaseDomain(window.location.hostname);
+    const targetBase = getBaseDomain(target);
+    return currentBase === targetBase;
+}
+
 function isSiteTrusted() {
     if (!GLOBAL_HVT_DATA) return false;
-    const hostname = window.location.hostname.toLowerCase();
     const hvts = GLOBAL_HVT_DATA.hvts || [];
     const whitelist = GLOBAL_HVT_DATA.whitelist || [];
     const userWhitelist = GLOBAL_HVT_DATA.user_whitelist || [];
 
-    const isHVT = hvts.some(hvt => hvt.domains.some(d => hostname === d || hostname.endsWith('.' + d)));
-    const isWhitelisted = whitelist.some(d => hostname === d || hostname.endsWith('.' + d));
-    const isUserWhitelisted = userWhitelist.some(d => hostname === d || hostname.endsWith('.' + d));
+    const isHVT = hvts.some(hvt => hvt.domains.some(d => isDomainMatch(d)));
+    const isWhitelisted = whitelist.some(d => isDomainMatch(d));
+    const isUserWhitelisted = userWhitelist.some(d => isDomainMatch(d));
 
     return isHVT || isWhitelisted || isUserWhitelisted;
 }
@@ -47,7 +61,11 @@ function captureForensicSnapshot(node = null) {
     };
     if (node && node.outerHTML) {
         // Truncate to avoid massive payloads
-        snapshot.offendingNode = node.outerHTML.substring(0, 1000);
+        let html = node.outerHTML.substring(0, 1000);
+        // Privacy: Mask potential sensitive data in forensics
+        html = html.replace(/\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g, "[MASKED-CC]");
+        html = html.replace(/value="[^"]*"/gi, 'value="[MASKED-VALUE]"');
+        snapshot.offendingNode = html;
         snapshot.parentContext = node.parentElement ? node.parentElement.tagName : "N/A";
     }
     return snapshot;
@@ -97,16 +115,17 @@ async function showSafeBrowsingReminder() {
     }, 6000);
 }
 
-// Prompt Injection Shield: Defense against command-based attacks and Prompt Injection
-// Prompt Injection Shield: Defense against command-based attacks and Prompt Injection
-async function runPromptInjectionShield(hvtData) {
-    const settings = await browser.storage.local.get({ promptInjectionShieldEnabled: true });
-    if (!settings.promptInjectionShieldEnabled) return;
+// Hidden Command Shield: Defense against hidden command-based attacks
+// Hidden Command Shield: Defense against hidden command-based attacks
+
+async function runHiddenCommandShield(hvtData) {
+    const settings = await browser.storage.local.get({ commandShieldEnabled: true });
+    if (!settings.commandShieldEnabled) return;
 
     const currentDomain = window.location.hostname.toLowerCase();
 
     // Skip heavy DOM traversal on Cloudflare
-    if (currentDomain.includes('cloudflare') || currentDomain.includes('challenges')) return;
+    if (isDomainMatch('cloudflare.com') || isDomainMatch('challenges.cloudflare.com')) return;
 
     // 1. Detect "Hidden Commands" (Indirect Prompt Injection)
     const injectionKeywords = [
@@ -116,8 +135,8 @@ async function runPromptInjectionShield(hvtData) {
 
     const fetchedHvts = hvtData.hvts || [];
     const userWhitelist = hvtData.user_whitelist || [];
-    const isHVT = fetchedHvts.some(hvt => hvt.domains.some(d => currentDomain === d || currentDomain.endsWith('.' + d)));
-    const isUserWhitelisted = userWhitelist.some(d => currentDomain === d || currentDomain.endsWith('.' + d));
+    const isHVT = fetchedHvts.some(hvt => hvt.domains.some(d => isDomainMatch(d)));
+    const isUserWhitelisted = userWhitelist.some(d => isDomainMatch(d));
 
     if (isUserWhitelisted || hvtData.is_challenge_mode) return; // User allowed or Cloudflare challenge active
 
@@ -160,9 +179,9 @@ async function runPromptInjectionShield(hvtData) {
 
                 const textContent = node.textContent.toLowerCase();
                 if (injectionKeywords.some(kw => textContent.includes(kw))) {
-                    console.warn("🛡️ PROMPT INJECTION SHIELD: Detected potential hidden prompt injection!");
+                    console.warn("🛡️ HIDDEN COMMAND SHIELD: Detected potential hidden injection!");
                     const forensics = captureForensicSnapshot(node);
-                    showToast("complete", "infected", browser.i18n.getMessage("promptInjectionRisk"), browser.i18n.getMessage("promptInjectionMessage"));
+                    showToast("complete", "infected", browser.i18n.getMessage("commandInjectionRisk"), browser.i18n.getMessage("commandInjectionMessage"));
                     browser.runtime.sendMessage({
                         action: "log_behavior",
                         threat: "Hidden Prompt Injection / Command Injection Attempt",
@@ -283,9 +302,10 @@ async function deployHoneypots(hvtData) {
 // Formjacking & Keylogger Shield
 // ------------------------------------------------------------------
 function deployFormjackingShield() {
-    // Inject script into the main page context to hook EventTarget.prototype.addEventListener
-    const script = document.createElement('script');
-    script.textContent = `
+    try {
+        // Inject script into the main page context to hook EventTarget.prototype.addEventListener
+        const script = document.createElement('script');
+        script.textContent = `
         (function() {
             const origAddEventListener = EventTarget.prototype.addEventListener;
             EventTarget.prototype.addEventListener = function(type, listener, options) {
@@ -322,25 +342,28 @@ function deployFormjackingShield() {
             EventTarget.prototype.addEventListener.toString = function() { return "function addEventListener() { [native code] }"; };
         })();
     `;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
 
-    // Listen for alerts from the injected script
-    document.addEventListener(SYS_SECRET_TOKEN, (event) => {
-        if (event.detail && event.detail.__sys_form_event) {
-            console.warn("🛡️ FORMJACKING SHIELD:", event.detail.threat);
-            if (!window._sysFormEventAlerted) {
-                window._sysFormEventAlerted = true;
-                const forensics = captureForensicSnapshot(document.activeElement);
-                showWarningToast("🛑 KEYLOGGER / FORMJACKING", `Suspicious listener attached to ${event.detail.target} input!`);
-                browser.runtime.sendMessage({
-                    action: "log_formjacking",
-                    threat: event.detail.threat + " - " + event.detail.target,
-                    forensics: forensics
-                }).catch(() => { });
+        // Listen for alerts from the injected script
+        document.addEventListener(SYS_SECRET_TOKEN, (event) => {
+            if (event.detail && event.detail.__sys_form_event) {
+                console.warn("🛡️ FORMJACKING SHIELD:", event.detail.threat);
+                if (!window._sysFormEventAlerted) {
+                    window._sysFormEventAlerted = true;
+                    const forensics = captureForensicSnapshot(document.activeElement);
+                    showWarningToast("🛑 KEYLOGGER / FORMJACKING", `Suspicious listener attached to ${event.detail.target} input!`);
+                    browser.runtime.sendMessage({
+                        action: "log_formjacking",
+                        threat: event.detail.threat + " - " + event.detail.target,
+                        forensics: forensics
+                    }).catch(() => { });
+                }
             }
-        }
-    });
+        });
+    } catch (e) {
+        console.warn("🛡️ FORMJACKING SHIELD: Dynamic injection blocked by site CSP. Behavioral monitoring limited to high-privilege context.");
+    }
 }
 
 // ------------------------------------------------------------------
@@ -556,12 +579,12 @@ async function deployFingerprintPoisoningShield(hvtData) {
     const currentHost = window.location.hostname.toLowerCase();
 
     const isHVT = fetchedHvts.some(hvt =>
-        hvt.domains.some(d => currentHost === d || currentHost.endsWith('.' + d))
+        hvt.domains.some(d => isDomainMatch(d))
     );
-    const isWhitelisted = whitelist.some(d => currentHost === d || currentHost.endsWith('.' + d));
-    const isUserWhitelisted = userWhitelist.some(d => currentHost === d || currentHost.endsWith('.' + d));
+    const isWhitelisted = whitelist.some(d => isDomainMatch(d));
+    const isUserWhitelisted = userWhitelist.some(d => isDomainMatch(d));
 
-    if (isHVT || isWhitelisted || isUserWhitelisted || hvtData.is_challenge_mode || currentHost.includes('cloudflare') || currentHost.includes('challenges')) {
+    if (isHVT || isWhitelisted || isUserWhitelisted || hvtData.is_challenge_mode || isDomainMatch('cloudflare.com') || isDomainMatch('challenges.cloudflare.com')) {
         console.log("🛡️ PRIVACY SHIELD: Skipping fingerprint poisoning for trusted portal to maintain anti-fraud integrity.");
         return;
     }
@@ -649,15 +672,15 @@ async function deployDOMAnomalyShield(hvtData) {
     }
 
     // Skip Cloudflare challenges as they use heavy legitimate overlays
-    if (currentHost.includes('cloudflare') || currentHost.includes('challenges')) return;
+    if (isDomainMatch('cloudflare.com') || isDomainMatch('challenges.cloudflare.com')) return;
 
     const isWhitelistedDynamic = () => {
         const hostname = window.location.hostname.toLowerCase();
         const base = hostname.split('.').slice(-2).join('.'); // newsblur.com from www.newsblur.com
 
         // Check HVTs and Global Whitelist
-        const inStatic = fetchedHvts.some(hvt => hvt.domains.some(d => hostname === d || hostname.endsWith('.' + d))) ||
-            whitelist.some(d => hostname === d || hostname.endsWith('.' + d));
+        const inStatic = fetchedHvts.some(hvt => hvt.domains.some(d => isDomainMatch(d))) ||
+            whitelist.some(d => isDomainMatch(d));
         if (inStatic) return true;
 
         // Check Live User Whitelist
@@ -865,7 +888,7 @@ browser.storage.onChanged.addListener((changes, area) => {
     // Start heavier logic once DOM is interactive
     const initFull = async () => {
         showSafeBrowsingReminder();
-        runPromptInjectionShield(hvtData);
+        runHiddenCommandShield(hvtData);
         deployHoneypots(hvtData);
         await deployVisualAntiPhishing(hvtData);
         deployDriveByDownloadShield();
@@ -1201,7 +1224,12 @@ async function monitorDOMTampering(hvtData) {
                     // Detect unexpected script injections or overlays (WebInjects)
                     if (node.tagName === 'SCRIPT') {
                         // Check if script is sourced from an external, non-standard domain
-                        if (node.src && !node.src.includes(currentDomain) && !node.src.includes("google") && !node.src.includes("cdn") && !node.src.includes("gstatic")) {
+                        const src = node.src ? node.src.toLowerCase() : "";
+                        const isTrustedSrc = src.includes(currentDomain) ||
+                            src.includes("google.com") ||
+                            src.includes("gstatic.com") ||
+                            src.includes("googleapis.com");
+                        if (src && !isTrustedSrc) {
                             console.warn("🛡️ DOM SHIELD ALERT: Suspicious cross-origin script injected!", node.src);
                             const forensics = captureForensicSnapshot(node);
                             showWarningToast(

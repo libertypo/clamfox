@@ -2,6 +2,20 @@
 const DEBUG = false;
 const dbg = (...args) => { if (DEBUG) console.log(...args); };
 
+// Supply-Chain Canary (Injected at build time)
+const CLAMFOX_CANARY = "PLACEHOLDER_CANARY";
+
+function runIntegrityAudit() {
+    // If the canary is missing or still the placeholder in a production build, 
+    // it indicates an unofficial or tampered distribution.
+    if (CLAMFOX_CANARY === "PLACEHOLDER_CANARY" && !DEBUG) {
+        console.error("🛑 INTEGRITY ERROR: Supply-Chain Canary missing. This build may be unofficial.");
+        browser.action.setBadgeText({ text: "LAK" }); // "Leak/integrity"
+        browser.action.setBadgeBackgroundColor({ color: "#f59e0b" });
+    }
+}
+runIntegrityAudit();
+
 const NATIVE_HOST_NAME = "clamav_host";
 let HOST_AVAILABLE = false; // Detected at runtime
 
@@ -9,6 +23,11 @@ const SCAN_INTERVAL_BYTES = 10 * 1024 * 1024; // Scan every 10MB
 const allowedAfterChallenge = new Set(); // Tracks hosts that just completed a Cloudflare challenge
 const ACTIVE_CHALLENGES = new Map(); // tabId -> expiration timestamp
 const USER_WHITELIST = new Set(); // Persistent overrides
+
+// WASM Shield State
+let WASM_READY = false;
+let wasmInstance = null;
+let wasmExports = null;
 
 async function initWhitelist() {
     const storage = await browser.storage.local.get("userWhitelist");
@@ -18,20 +37,12 @@ async function initWhitelist() {
     }
 }
 
-function getBaseDomain(hostname) {
-    if (!hostname) return "";
-    const parts = hostname.split('.');
-    if (parts.length > 2) {
-        // Simple base domain heuristic (handles .com, .net, etc, but not .co.uk)
-        // For a production extension, a public suffix list would be better.
-        return parts.slice(-2).join('.');
-    }
-    return hostname;
-}
+// getBaseDomain is now provided by psl_data.js
 
 function isPortal(hostname) {
     if (!hostname) return false;
-    return SECURE_PORTALS.some(d => hostname === d || hostname.endsWith("." + d));
+    const base = getBaseDomain(hostname);
+    return SECURE_PORTALS.some(d => base === d);
 }
 
 function isWhitelisted(hostname) {
@@ -40,8 +51,9 @@ function isWhitelisted(hostname) {
     if (isPortal(hostname)) return true;
 
     // 2. Check Persistent User Overrides
+    const base = getBaseDomain(hostname);
     const whitelistArr = Array.from(USER_WHITELIST);
-    if (whitelistArr.some(d => hostname === d || hostname.endsWith("." + d) || d.endsWith("." + hostname))) return true;
+    if (whitelistArr.some(d => base === d)) return true;
 
     return false;
 }
@@ -53,8 +65,48 @@ let SESSION_HOST_SECRET = null; // Ephemeral Cryptographic Secret
 
 // Initialized via initBackground()
 
+async function initWasm() {
+    try {
+        const response = await fetch(browser.runtime.getURL("wasm_shield/clamfox_shield.wasm"));
+        const bytes = await response.arrayBuffer();
+
+        // 1. Integrity Audit: Internal Subresource Integrity (SRI)
+        const hashBuffer = await crypto.subtle.digest("SHA-256", bytes);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+        const EXPECTED_WASM_HASH = "2b6babb47828432d460efa5314c164afa6f742366c8a1fc53df4b195b39f5f67";
+        if (hashHex !== EXPECTED_WASM_HASH) {
+            console.error("🛑 SECURITY ALERT: WASM Core tampered or corrupt! SRI verification failed.");
+            browser.action.setBadgeText({ text: "WSRI" });
+            browser.action.setBadgeBackgroundColor({ color: "#ef4444" });
+            return;
+        }
+
+        const results = await WebAssembly.instantiate(bytes, {
+            // Minimal web-bindgen like imports if needed
+            env: {
+                memory: new WebAssembly.Memory({ initial: 256 }),
+                abort: () => { console.error("WASM Aborted"); }
+            },
+            "./clamfox_shield_bg.js": {
+                // Mocks for basic functionality if bindgen were used
+                __wbindgen_string_new: function (ptr, len) { /* ... */ },
+                __wbindgen_object_drop_ref: function (arg0) { /* ... */ },
+            }
+        });
+        wasmInstance = results.instance;
+        wasmExports = wasmInstance.exports;
+        WASM_READY = true;
+        dbg("🛡️ WASM CORE: High-Speed Matching Engine active.");
+    } catch (e) {
+        console.warn("🛡️ WASM SHIELD: Failed to load (Falling back to Native Host for all checks):", e);
+    }
+}
+
 async function initBackground() {
     await initWhitelist();
+    await initWasm();
     const storage = await browser.storage.local.get("honeypotSecret");
     if (storage.honeypotSecret) {
         HONEYPOT_SECRET = storage.honeypotSecret;
@@ -93,6 +145,11 @@ browser.tabs.onRemoved.addListener((tabId) => {
         ACTIVE_CHALLENGES.delete(tabId);
     }
 
+    // Cleanup Rate Limiter data for the tab
+    if (THREAT_RATE_LIMITER.has(`rate:tab:${tabId}`)) {
+        THREAT_RATE_LIMITER.delete(`rate:tab:${tabId}`);
+    }
+
     browser.storage.local.remove(`tab_escalated_${tabId}`).catch(() => { });
 });
 
@@ -119,6 +176,24 @@ browser.alarms.onAlarm.addListener((alarm) => {
             if (info.lastUpdated && (now - info.lastUpdated) > 7200000) {
                 activeDownloads.delete(id);
                 cleanedDownloads++;
+            }
+        }
+
+        // Clean up THREAT_RATE_LIMITER stale entries (> 5 minutes)
+        for (const [key, value] of THREAT_RATE_LIMITER.entries()) {
+            if (Array.isArray(value)) {
+                // Tab rate limit history
+                const recent = value.filter(t => (now - t) < 300000); // 5 mins
+                if (recent.length === 0) {
+                    THREAT_RATE_LIMITER.delete(key);
+                } else {
+                    THREAT_RATE_LIMITER.set(key, recent);
+                }
+            } else if (typeof value === 'number') {
+                // Deduplication timestamp
+                if ((now - value) > 300000) {
+                    THREAT_RATE_LIMITER.delete(key);
+                }
             }
         }
 
@@ -275,12 +350,15 @@ async function getSecret(forceRefresh = false) {
         const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check" }, 5000);
 
         if (response && (response.integrity_ok === false || response.binary_ok === false)) {
-            console.error("🛑 SECURITY ALERT: Host seal broken on startup. User needs to re-seal.");
+            console.warn("🛡️ SECURITY ALERT: Host seal broken. Re-seal required for full protection.");
             browser.action.setBadgeText({ text: "SEAL" });
             browser.action.setBadgeBackgroundColor({ color: "#ef4444" });
-            HOST_AVAILABLE = false;
-            await browser.storage.local.set({ hostActive: false, sealBroken: true });
-            return null;
+            HOST_AVAILABLE = true;
+            if (response.secret && response.secret !== "****") {
+                SESSION_HOST_SECRET = response.secret;
+            }
+            await browser.storage.local.set({ hostActive: true, sealBroken: true });
+            return SESSION_HOST_SECRET;
         }
 
         if (response && response.secret && response.secret !== "****") {
@@ -296,6 +374,11 @@ async function getSecret(forceRefresh = false) {
             browser.action.setBadgeText({ text: "" });
             dbg("🔒 Security Handshake successful (Host + Honeypot). Core features enabled.");
             return response.secret;
+        } else if (response && response.secret === "****" && SESSION_HOST_SECRET) {
+            // Host is alive but refusing to re-issue secret. This is normal if we already have it.
+            HOST_AVAILABLE = true;
+            dbg("🔒 Security Handshake: Host refused re-issue (Already issued). Using cached secret.");
+            return SESSION_HOST_SECRET;
         }
     } catch (e) {
         HOST_AVAILABLE = false;
@@ -364,6 +447,23 @@ browser.webRequest.onBeforeRequest.addListener(
             return {};
         }
 
+        // --- NEW: WASM High-Speed Pre-Scan ---
+        if (WASM_READY && wasmExports) {
+            // 1. Homograph Detection (In-process, no bridge lag)
+            const homographResult = wasmExports.check_homograph_attack(details.url);
+            if (homographResult) {
+                handleMaliciousUrl(details.url, homographResult, details.tabId);
+                return; // Short-circuit
+            }
+
+            // 2. DGA / Statistical Detection
+            const dgaResult = wasmExports.check_dga_heuristics(details.url);
+            if (dgaResult) {
+                handleMaliciousUrl(details.url, dgaResult, details.tabId);
+                return; // Short-circuit
+            }
+        }
+
         try {
             const secret = await getSecret();
 
@@ -379,6 +479,12 @@ browser.webRequest.onBeforeRequest.addListener(
             ]);
 
             if (response.status === "timeout") {
+                const settings = await browser.storage.local.get({ strictMode: false });
+                if (settings.strictMode) {
+                    console.error("🛑 SECURITY FAIL-CLOSED: Host response timed out. Blocking request due to Strict Mode.");
+                    handleMaliciousUrl(details.url, "Scan Timeout (Strict Mode)", details.tabId);
+                    return { cancel: true };
+                }
                 console.warn("🛡️ SECURITY FAIL-OPEN: Host response timed out (3s). Proceeding for stability.");
                 return {};
             }
@@ -389,30 +495,36 @@ browser.webRequest.onBeforeRequest.addListener(
             }
 
             if (response.status === "malicious") {
-                logBlock(new URL(details.url).hostname, response.threat || "URLhaus Blocklist", details.url, details.tabId);
-
-                browser.notifications.create({
-                    type: "basic",
-                    iconUrl: "icons/warning.svg",
-                    title: browser.i18n.getMessage("siteBlockedTitle") || "🛑 MALICIOUS SITE BLOCKED",
-                    message: `ClamFox prevented a connection to ${new URL(details.url).hostname}. This site is flagged as: ${response.threat || "Malicious"}.`,
-                    priority: 2
-                });
-
-                const blockedUrl = browser.runtime.getURL("popup/blocked.html") +
-                    "?url=" + encodeURIComponent(details.url) +
-                    "&threat=" + encodeURIComponent(response.threat || "URLhaus Blocklist") +
-                    "&confirmed=" + (response.confirmed ? "1" : "0");
-
-                // Asynchronous Manifest V3 redirect (since blocking is prohibited)
-                if (details.tabId !== -1) {
-                    browser.tabs.update(details.tabId, { url: blockedUrl }).catch(() => { });
-                }
+                handleMaliciousUrl(details.url, response.threat || "URLhaus Blocklist", details.tabId, response.confirmed);
             }
         } catch (e) { }
     },
     { urls: ["<all_urls>"] }
 );
+
+function handleMaliciousUrl(urlStr, threatName, tabId, confirmed = false) {
+    let url;
+    try { url = new URL(urlStr); } catch (e) { url = { hostname: urlStr }; }
+
+    logBlock(url.hostname, threatName, urlStr, tabId);
+
+    browser.notifications.create({
+        type: "basic",
+        iconUrl: "icons/warning.svg",
+        title: browser.i18n.getMessage("siteBlockedTitle") || "🛑 MALICIOUS SITE BLOCKED",
+        message: `ClamFox prevented a connection to ${url.hostname}. This site is flagged as: ${threatName}.`,
+        priority: 2
+    });
+
+    const blockedUrl = browser.runtime.getURL("popup/blocked.html") +
+        "?url=" + encodeURIComponent(urlStr) +
+        "&threat=" + encodeURIComponent(threatName) +
+        "&confirmed=" + (confirmed ? "1" : "0");
+
+    if (tabId && tabId !== -1) {
+        browser.tabs.update(tabId, { url: blockedUrl }).catch(() => { });
+    }
+}
 
 // Exfiltration Interception: Scan POST/WebSocket data flows
 browser.webRequest.onBeforeRequest.addListener(
@@ -607,7 +719,31 @@ browser.webRequest.onBeforeRequest.addListener(
 
 
 
+const THREAT_RATE_LIMITER = new Map();
+
 async function logBlock(name, reason, url, tabId = null, forensicData = null) {
+    // 1. DEDUPLICATION: Prevent reporting the same threat for the same URL in the last 10 seconds
+    const dedupKey = `${reason}:${url}`;
+    const lastReported = THREAT_RATE_LIMITER.get(dedupKey);
+    if (lastReported && (Date.now() - lastReported) < 10000) {
+        return { status: "ignored", reason: "duplicate" };
+    }
+    THREAT_RATE_LIMITER.set(dedupKey, Date.now());
+
+    // 2. RATE LIMITING: Max 5 incidents per minute per tab
+    if (tabId) {
+        const tabKey = `rate:tab:${tabId}`;
+        let tabHistory = THREAT_RATE_LIMITER.get(tabKey) || [];
+        const now = Date.now();
+        tabHistory = tabHistory.filter(t => (now - t) < 60000);
+        if (tabHistory.length >= 5) {
+            console.warn(`🛡️ RATE LIMITER: Ignoring security incident from tab ${tabId} (Limit reached)`);
+            return { status: "ignored", reason: "rate_limit_exceeded" };
+        }
+        tabHistory.push(now);
+        THREAT_RATE_LIMITER.set(tabKey, tabHistory);
+    }
+
     const storage = await browser.storage.local.get({ blockedHistory: [] });
     const blocks = storage.blockedHistory;
 
@@ -859,12 +995,29 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
-    dbg("Internal message received:", message);
+    const extensionOrigin = browser.runtime.getURL("");
+    const isExtensionPage = sender.url && sender.url.startsWith(extensionOrigin);
+
+    dbg(`Internal message received from ${sender.url ? sender.url : "unknown"}:`, message);
 
     const handleMessage = async () => {
         // Skip internal pages
         if (message.url && (message.url.startsWith("about:") || message.url.startsWith("chrome:") || message.url.startsWith("file:"))) {
             return { status: "clean", info: "internal_page_skipped" };
+        }
+
+        // --- PRIVILEGE ESCALATION PROTECTION ---
+        // Block content scripts from calling sensitive host-proxying or administrative actions.
+        const privilegedActions = [
+            "scan_request", "proxy_check", "proxy_update", "proxy_force_engine_update",
+            "proxy_reconnect", "proxy_reseal", "proxy_update_yara", "proxy_get_logs",
+            "proxy_report_threat", "proxy_list_quarantine", "proxy_restore",
+            "update_alarm_settings", "bypass_domain", "rotate_secret", "get_intel"
+        ];
+
+        if (!isExtensionPage && privilegedActions.includes(message.action)) {
+            console.error(`🛡️ SECURITY ALERT: Content script at ${sender.url} tried to trigger privileged action: ${message.action}`);
+            return { status: "error", error: "Unauthorized privileged action from content script." };
         }
 
         let secret = await getSecret();
@@ -884,6 +1037,12 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     SESSION_HOST_SECRET = res.secret;
                 }
 
+                // SECURITY: Never leak the host secret back to the caller (even internal pages).
+                // Extension pages should use getSecret() if they need it.
+                if (res && res.secret) {
+                    delete res.secret;
+                }
+
                 return res;
             } catch (e) {
                 console.warn("Diagnostic: proxy_check failed, attempting force refresh...", e);
@@ -892,6 +1051,11 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     const newSecret = await getSecret(true);
                     const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: newSecret });
                     dbg("Diagnostic: proxy_check success after refresh:", res);
+
+                    if (res && res.secret) {
+                        delete res.secret;
+                    }
+
                     return res;
                 } catch (err) {
                     console.error("Diagnostic: proxy_check CRITICAL FAILURE:", err);

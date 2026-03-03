@@ -25,12 +25,14 @@
                 "<all_urls>"
             ],
             "js": [
+                "psl_data.js",
                 "content.js"
             ],
             "css": [
                 "design_tokens.css",
                 "content.css"
-            ]
+            ],
+            "all_frames": true
         }
     ],
     "browser_specific_settings": {
@@ -46,6 +48,7 @@
     },
     "background": {
         "scripts": [
+            "psl_data.js",
             "background.js"
         ]
     },
@@ -65,8 +68,17 @@
             "128": "icons/icon128.png"
         }
     },
-    "web_accessible_resources": [],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "wasm_shield/clamfox_shield.wasm"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
     "content_security_policy": {
-        "extension_pages": "script-src 'self'; object-src 'none';"
+        "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none';"
     }
 }

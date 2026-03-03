@@ -115,11 +115,11 @@
     "ghostHint": {
         "message": "Disabilita TUTTE le ricerche API esterne"
     },
-    "promptShieldLabel": {
-        "message": "Protezione Prompt Injection"
+    "commandShieldLabel": {
+        "message": "Protezione Comandi Nascosti"
     },
-    "promptShieldHint": {
-        "message": "Blocca prompt injection nascosti e dirottamenti input"
+    "commandShieldHint": {
+        "message": "Blocca comandi nascosti e dirottamenti input"
     },
     "intelSyncSection": {
         "message": "Sincronizzazione Intelligence"
@@ -342,17 +342,17 @@
     "safeBrowsingHint": {
         "message": "Ricorda di evitare annunci sospetti o email di phishing."
     },
-    "promptInjectionRisk": {
-        "message": "Rischio Prompt Injection"
+    "commandInjectionRisk": {
+        "message": "Rischio Comandi Nascosti"
     },
-    "promptInjectionMessage": {
+    "commandInjectionMessage": {
         "message": "SICUREZZA: La pagina contiene istruzioni invisibili."
     },
     "inputHijackBlocked": {
         "message": "Dirottamento Input Bloccato"
     },
     "inputHijackMessage": {
-        "message": "Sicurezza: Uno script in background ha cercato di modificare il prompt."
+        "message": "Sicurezza: Uno script in background ha cercato di modificare il comando."
     },
     "customPortalsSection": {
         "message": "Portali Protetti"

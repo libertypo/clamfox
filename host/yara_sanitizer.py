@@ -78,19 +78,35 @@ class YaraSanitizer:
 
         return "\n\n".join(cleaned_rules)
 
-    def sync_from_url(self, url, filename):
+    def sync_from_url(self, url, filename, proxies=None, headers=None):
         """Downloads a YARA bundle, sanitizes it, and saves."""
         try:
             print(f"Fetching YARA signatures from {url}...")
-            response = requests.get(url, timeout=30)
+            # Use streaming to prevent OOM on massive files
+            response = requests.get(url, timeout=60, proxies=proxies, headers=headers, stream=True)
             if response.status_code != 200:
                 return False, f"HTTP {response.status_code}"
 
+            # Security: Cap the download size to prevent resource exhaustion
+            # We allow up to 2x MAX_UNCOMPRESSED_SIZE for the compressed ZIP bundle
+            download_limit = MAX_UNCOMPRESSED_SIZE * 2
+            
+            content_buffer = io.BytesIO()
+            downloaded = 0
+            
+            for chunk in response.iter_content(chunk_size=65536):
+                if chunk:
+                    downloaded += len(chunk)
+                    if downloaded > download_limit:
+                        return False, f"Download aborted: Size exceeds security limit ({download_limit} bytes)"
+                    content_buffer.write(chunk)
+            
+            raw_data = content_buffer.getvalue()
             total_sanitized = 0
             
             # Handle Zip bundles
             if url.endswith('.zip'):
-                with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                with zipfile.ZipFile(io.BytesIO(raw_data)) as z:
                     # 1. Integrity Check
                     if z.testzip() is not None:
                         return False, "Corrupt ZIP archive detected."
@@ -121,7 +137,7 @@ class YaraSanitizer:
                                     total_sanitized += 1
             else:
                 # Single file
-                content = response.text
+                content = raw_data.decode('utf-8', errors='ignore')
                 sanitized = self.sanitize_content(content)
                 if sanitized.strip():
                     with open(os.path.join(self.output_dir, filename), 'w') as out:

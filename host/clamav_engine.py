@@ -20,15 +20,33 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import base64
 
 from tpm_provider import TpmProvider
+from yara_sanitizer import YaraSanitizer
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-# Security Guard: Pre-emptively poison Python's `pickle` library to prevent future unauthorized use (Deserialization RCE)
-sys.modules['pickle'] = None
-sys.modules['_pickle'] = None
-sys.modules['cPickle'] = None
+# Supply-Chain Canary (Injected at build time)
+CLAMFOX_CANARY = "PLACEHOLDER_CANARY"
+
+def verify_canary_integrity():
+    """Verify filesystem and code-level supply chain canaries."""
+    host_dir = os.path.dirname(os.path.abspath(__file__))
+    canary_file = os.path.join(host_dir, "signatures", ".canary")
+    
+    # 1. Check Filesystem Canary (Dropped by install.sh)
+    if not os.path.exists(canary_file):
+        log_debug("🚨 INTEGRITY WARNING: Filesystem Canary missing. Build may be unofficial or tampered.")
+        return False
+        
+    # 2. Check Code Canary (Injected by package.sh)
+    if CLAMFOX_CANARY == "PLACEHOLDER_CANARY":
+        # In developer mode, this is expected. In production/opt, it's a red flag.
+        if host_dir.startswith("/opt/"):
+             log_debug("🚨 INTEGRITY ERROR: Production code canary mismatch (PLACEHOLDER found).")
+             return False
+    return True
+
 # Setup Localization (I18N)
 def _setup_i18n():
     localedir = os.path.join(os.path.dirname(__file__), 'locales')
@@ -54,6 +72,7 @@ _GLOBAL_TIMEOUT = 45            # Hard limit for clamscan (seconds)
 _NETWORK_TIMEOUT = 15           # Limit for API/Fetch (seconds)
 _MAX_CONTAINER_FILES = 500      # Max files in an archive to prevent ZIP bombs
 _MAX_CONTAINER_UNCOMPRESSED_SIZE = 100 * 1024 * 1024 # 100 MB max uncompressed size for archives
+_QUARANTINE_DIR = os.path.expanduser("~/.clamfox_quarantine")
 
 _config_lock = threading.Lock()
 _output_lock = threading.Lock()
@@ -78,14 +97,152 @@ _thread_pool = ThreadPoolExecutor(max_workers=6)
 # low-end hardware and avoid spawning more processes than logical cores.
 _process_pool = ProcessPoolExecutor(max_workers=min(os.cpu_count() or 2, 4))
 
-# Security: Resolve external tool paths at startup using shutil.which to prevent
-# PATH hijacking attacks (a malicious binary earlier in PATH could otherwise be used).
-_BIN_FILE     = shutil.which("file")
-_BIN_7Z       = shutil.which("7z")
-_BIN_FRESHCLAM = shutil.which("freshclam")
+# Runtime Integrity Watchdog State
+_MODULE_SNAPSHOTS = {}
+_CRITICAL_MODULES = ["clamav_engine.py", "tpm_provider.py", "yara_sanitizer.py", "ert_signer.py"]
+_secret_issued = False # SECURITY: Only emit secret once per host execution
+
+def capture_runtime_snapshots():
+    """Capture initial SHA-256 hashes of all critical host modules."""
+    host_dir = os.path.dirname(os.path.abspath(__file__))
+    for module in _CRITICAL_MODULES:
+        path = os.path.join(host_dir, module)
+        if os.path.exists(path):
+            _MODULE_SNAPSHOTS[module] = get_file_hash(path)
+    log_debug(f"🛡️  INTEGRITY: Captured runtime snapshots for {len(_MODULE_SNAPSHOTS)} modules.")
+
+def runtime_integrity_sentinel():
+    """Background thread that re-verifies module integrity at random intervals."""
+    log_debug("🛡️  INTEGRITY: Sentinel Watchdog activated.")
+    while True:
+        try:
+            # Sleep for a random interval between 10 and 20 minutes to prevent timing attacks
+            wait_time = random.randint(600, 1200)
+            time.sleep(wait_time)
+            
+            host_dir = os.path.dirname(os.path.abspath(__file__))
+            # Select a random module to audit
+            module = random.choice(_CRITICAL_MODULES)
+            path = os.path.join(host_dir, module)
+            
+            if os.path.exists(path):
+                current_hash = get_file_hash(path)
+                stored_hash = _MODULE_SNAPSHOTS.get(module)
+                
+                if stored_hash and current_hash != stored_hash:
+                    log_debug(f"🚨 CRITICAL SECURITY ALERT: Runtime Integrity Violation in {module}!")
+                    log_debug(f"   Original: {stored_hash}")
+                    log_debug(f"   Current:  {current_hash}")
+                    # Signal the UI (if possible) or take drastic action
+                    # For now, we log the incident heavily. In a mission-critical setup, sys.exit(1) here.
+                    
+        except Exception as e:
+            log_debug(f"INTEGRITY ERROR (Sentinel): {e}")
+
+def verify_kernel_integrity():
+    """Verify FS-Verity state if supported by the kernel."""
+    if not shutil.which("fsverity"):
+        return
+    
+    try:
+        # Measure this script's kernel integrity
+        res = subprocess.run(["fsverity", "measure", __file__], capture_output=True, text=True, timeout=5)
+        if res.returncode == 0:
+            digest = res.stdout.strip()
+            log_debug(f"🛡️  KERNEL-VERITY: {digest}")
+        else:
+            # If fsverity is installed but measurement fails, it might be tampered or verity not enabled
+            # We don't exit here to avoid breaking systems where verity is available but not supported on the mount
+            pass
+    except Exception:
+        pass
+
+
+def try_opportunistic_sandboxing():
+    """DEACTIVATED: Sandboxing has been disabled by user request."""
+    # log_debug("🛡️  SANDBOX: Deactivated by user request.")
+    return
+    # 1. Skip if already sandboxed (sentinel env var) or in conflicting environments
+    if os.environ.get("CLAMFOX_SANDBOXED"):
+        return
+        
+    # Detect Flatpak / Snap (Nested sandboxing usually fails here)
+    is_flatpak = os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
+    is_snap = "SNAP" in os.environ
+    
+    if is_flatpak or is_snap:
+        log_debug("🛡️  SANDBOX: Container environment detected (Flatpak/Snap). Bypassing nested bwrap.")
+        return
+
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        log_debug("🛡️  SANDBOX: bubblewrap (bwrap) not found. Standard execution active.")
+        return
+
+    log_debug("🛡️  SANDBOX: bubblewrap found. Re-executing in isolated namespace...")
+    
+    host_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # DBus Proxy logic for System Keyring access
+    dbus_addr = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
+    proxy_cmd = []
+    if dbus_addr and dbus_addr.startswith("unix:path="):
+        bus_path = dbus_addr.split("=", 1)[1]
+        proxy_bin = shutil.which("xdg-dbus-proxy")
+        if proxy_bin:
+            proxy_socket = os.path.join(tempfile.gettempdir(), f"clamfox_dbus_{os.getpid()}")
+            # Start proxy to ONLY allow secret service
+            proxy_proc = subprocess.Popen([
+                proxy_bin,
+                dbus_addr,
+                proxy_socket,
+                "--talk=org.freedesktop.secrets"
+            ])
+            # Give it a moment to start
+            time.sleep(0.1)
+            proxy_cmd = ["--bind", proxy_socket, bus_path]
+
+    # Bubblewrap Arguments:
+    # --ro-bind / / : Read-only root
+    # --dev /dev, --proc /proc : Standard system binds
+    # --tmpfs /tmp : Private volatile storage
+    # --unshare-all : Namespace isolation (PID, Network, IPC, UTS)
+    # --share-net : Required for ClamAV updates & MalwareBazaar
+    # --bind [host_dir] [host_dir] : Writable access to our signatures and logs
+    cmd = [
+        bwrap,
+        "--ro-bind", "/", "/",
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--tmpfs", "/tmp",
+        "--unshare-all",
+        "--share-net",
+        "--bind", host_dir, host_dir
+    ]
+    
+    if proxy_cmd:
+        cmd.extend(proxy_cmd)
+        
+    cmd.extend([
+        "--setenv", "CLAMFOX_SANDBOXED", "1",
+        sys.executable, __file__
+    ])
+    
+    try:
+        # Re-execute and replace the current process
+        os.execv(bwrap, cmd)
+    except Exception as e:
+        log_debug(f"🚨 SANDBOX ERROR: Failed to launch bubblewrap: {e}")
+        # Fail-open: continue without sandbox if execv fails
+
+# Security: Resolve external tool paths at startup to prevent
+# PATH hijacking attacks. Use absolute paths for production reliability.
+_BIN_FILE     = "/usr/bin/file" if os.path.exists("/usr/bin/file") else shutil.which("file")
+_BIN_7Z       = "/usr/bin/7z" if os.path.exists("/usr/bin/7z") else shutil.which("7z")
+_BIN_FRESHCLAM = "/usr/bin/freshclam" if os.path.exists("/usr/bin/freshclam") else shutil.which("freshclam")
 _BIN_WL_PASTE = shutil.which("wl-paste")
 _BIN_XCLIP    = shutil.which("xclip")
-_BIN_SYSTEMCTL = shutil.which("systemctl")
+_BIN_SYSTEMCTL = "/usr/bin/systemctl" if os.path.exists("/usr/bin/systemctl") else shutil.which("systemctl")
 
 import itertools
 import base64
@@ -155,6 +312,12 @@ def derive_aes_key(private_key):
     except:
         return None
 
+def xor_buffer(data, key):
+    """Simple symmetric XOR for obfuscation. Used to bypass host-AV interference with definitions."""
+    if not data or not key: return data
+    key_len = len(key)
+    # Convert to bytearray for faster manipulation if it's large, but bytes/enumerate is fine for 1-10MB
+    return bytes(b ^ key[i % key_len] for i, b in enumerate(data))
 
 def secure_log_encode(text):
     if not isinstance(text, str): text = str(text)
@@ -428,9 +591,13 @@ def check_tor_reachable():
             continue
     return False, None
 
-def secure_fetch(url, output_path, use_tunnel=False, post_data=None):
+def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=None):
     """Fetch URL with optional Tor/VPN routing and leak protection."""
     cmd = ['curl', '-s', '-A', 'ClamFox-Native-Host/1.0', '-L', '--connect-timeout', '15']
+    
+    if headers:
+        for k, v in headers.items():
+            cmd.extend(['-H', f'{k}: {v}'])
     
     if use_tunnel:
         tor_active, tor_port = check_tor_reachable()
@@ -523,6 +690,9 @@ def load_config():
     vault_hash = keyring_get("integrity_hash")
     if vault_hash: config["integrity_hash"] = vault_hash
     
+    vault_hp = keyring_get("honeypot_secret")
+    if vault_hp: config["honeypot_secret"] = vault_hp
+    
     # --- ERT Hardware Unsealing ---
     if config.get("ert_enabled") and config.get("ert_sealed"):
         try:
@@ -548,7 +718,7 @@ def load_config():
 
 def save_config(config):
     """Save sensitive items to Keyring and public items to JSON (Thread-safe)."""
-    sensitive_keys = ["secret", "integrity_hash"]
+    sensitive_keys = ["secret", "integrity_hash", "honeypot_secret"]
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     
     with _config_lock:
@@ -575,14 +745,13 @@ def quarantine_file(filepath):
     try:
         if not os.path.exists(filepath): return False
         
-        quarantine_dir = os.path.join(os.path.dirname(__file__), "quarantine")
-        if not os.path.exists(quarantine_dir):
-            os.makedirs(quarantine_dir, mode=0o700) # Only owner can access
+        if not os.path.exists(_QUARANTINE_DIR):
+            os.makedirs(_QUARANTINE_DIR, mode=0o700) # Only owner can access
             
         filename = os.path.basename(filepath)
         import time
         safe_name = f"{int(time.time())}_{filename}.quarantine"
-        dest_path = os.path.join(quarantine_dir, safe_name)
+        dest_path = os.path.join(_QUARANTINE_DIR, safe_name)
         
         # 1. Strip all permissions BEFORE moving (Defense in depth)
         try: os.chmod(filepath, 0o000)
@@ -634,11 +803,10 @@ def restore_quarantine(filepath):
     """Safely restore a quarantined file to the user's Downloads directory."""
     try:
         if not filepath: return False
-        quarantine_dir = os.path.join(os.path.dirname(__file__), "quarantine")
         
         # Allow filepath to be exactly the filename in the quarantine dir, or a full path
         filename = os.path.basename(filepath)
-        source_path = os.path.join(quarantine_dir, filename)
+        source_path = os.path.join(_QUARANTINE_DIR, filename)
         
         if not os.path.exists(source_path):
             return False
@@ -729,7 +897,7 @@ def check_malwarebazaar(filepath):
                 sha256_hash.update(byte_block)
         file_hash = sha256_hash.hexdigest()
 
-        # Step 2: Check MalwareBazaar (abuse.ch)
+        # Step 2: Check MalwareBazaar (abuse.ch) using secure_fetch for privacy
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp_resp = tmp.name
         
@@ -742,23 +910,13 @@ def check_malwarebazaar(filepath):
         config = load_config()
         mb_api_key = config.get("mb_api_key")
         
-        cmd = ['curl', '-s', '-X', 'POST', '-A', 'ClamFox-Native-Host/1.0', '-L', '--connect-timeout', '15']
+        # We use secure_fetch which handles Tor/VPN and custom user-agent.
+        # However, MalwareBazaar requires POST with data, which secure_fetch supports.
+        headers = {}
         if mb_api_key:
-            cmd.extend(['-H', f'API-KEY: {mb_api_key}'])
-            
-        for k, v in post_data.items():
-            cmd.extend(['-d', f'{k}={v}'])
-            
-        cmd.extend(['-o', tmp_resp, '--', api_url])
+            headers['API-KEY'] = mb_api_key
         
-        # Use secure_fetch logic but with custom headers if needed
-        # For simplicity, we'll just use subprocess.run directly here since we need headers
-        try:
-            process = subprocess.run(cmd, capture_output=True, timeout=_NETWORK_TIMEOUT)
-            success = (process.returncode == 0)
-        except (subprocess.TimeoutExpired, OSError) as e:
-            log_debug(f"MalwareBazaar fetch failed: {e}")
-            success = False
+        success = secure_fetch(api_url, tmp_resp, use_tunnel=True, post_data=post_data, headers=headers)
         
         data = {}
         if success:
@@ -798,6 +956,16 @@ def update_intelligence(force=False):
             "name": "Global Whitelist (Tranco/Researchers)",
             "url": "https://tranco-list.eu/download/KVP9J/1000000",
             "path": os.path.join(run_dir, "whitelistdb.txt")
+        },
+        {
+            "name": "Maldet (LMD) MD5 Hashes",
+            "url": "http://www.rfxn.com/downloads/rfxn.hdb",
+            "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.hdb")
+        },
+        {
+            "name": "Maldet (LMD) Hex Patterns",
+            "url": "http://www.rfxn.com/downloads/rfxn.ndb",
+            "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.ndb")
         }
     ]
     
@@ -820,6 +988,20 @@ def update_intelligence(force=False):
             success = secure_fetch(src["url"], tmp_path, use_tunnel=True)
             
             if success and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000:
+                # 🛡️ Signature Obfuscation: Scramble .hdb and .ndb to prevent host-AV interference
+                if base_path.endswith(('.hdb', '.ndb')):
+                    try:
+                        priv_key = get_or_create_machine_key()
+                        xor_key = derive_aes_key(priv_key)
+                        if xor_key:
+                            with open(tmp_path, "rb") as f:
+                                scrambled = xor_buffer(f.read(), xor_key)
+                            with open(tmp_path, "wb") as f:
+                                f.write(scrambled)
+                            log_debug(f"Applied obfuscation seal to {src['name']}")
+                    except Exception as e:
+                        log_debug(f"Obfuscation failure for {src['name']}: {e}")
+
                 if os.path.exists(base_path):
                     old_path = base_path + ".old"
                     if os.path.exists(old_path): os.remove(old_path)
@@ -1154,6 +1336,12 @@ def verify_timelock(file_path):
             header = f.readline().strip()
             
         if not header.startswith("# CLAMFOX-TIME-LOCK:"):
+            # Security: Allow fallback for verified third-party feeds (URLhaus, Mitchell Krog, Tranco)
+            third_party_feeds = ["urldb.txt", "phishdb.txt", "whitelistdb.txt", "maldet.hdb", "maldet.ndb"]
+            if os.path.basename(file_path) in third_party_feeds:
+                log_debug(f"ℹ️  INTELLIGENCE: Loading third-party feed {os.path.basename(file_path)} (No time-lock header)")
+                return True
+            
             log_debug(f"TIME-LOCK ERROR: Missing signed header in {os.path.basename(file_path)}")
             return False
             
@@ -1350,7 +1538,7 @@ def calculate_shannon_entropy(data):
 
 def check_dga_heuristics(url):
     """
-    Experimental Statistical Heuristics (v0.6.x)
+    Experimental Statistical Heuristics (v0.6.x) - [FALLBACK FOR WASM-SHIELD]
     Detects Algorithmically Generated Domains (DGA) without ML binaries.
     """
     try:
@@ -1821,12 +2009,49 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
             }
 
         sig_dir = os.path.join(os.path.dirname(__file__), "signatures")
-        has_custom_sigs = os.path.exists(sig_dir) and any(f.endswith('.yar') or f.endswith('.cvd') for f in os.listdir(sig_dir))
+        has_custom_sigs = os.path.exists(sig_dir) and any(f.endswith(('.yar', '.cvd', '.hdb', '.ndb')) for f in os.listdir(sig_dir))
         
         # Fallback to clamscan if we have custom signatures, because clamdscan ignores -d flag
         if is_daemon and has_custom_sigs:
             path = shutil.which("clamscan") or path
             is_daemon = False
+
+        # 🛡️ HYDRATION ENGINE: De-obfuscate signatures into RAM-disk for scanning
+        hydration_dir = None
+        current_sig_dir = sig_dir
+        
+        if has_custom_sigs:
+            try:
+                # Create a temporary directory in /dev/shm (RAM-disk)
+                shm_base = "/dev/shm" if os.path.exists("/dev/shm") else None
+                hydration_dir = tempfile.mkdtemp(prefix="clamfox_sigs_", dir=shm_base)
+                
+                priv_key = get_or_create_machine_key()
+                xor_key = derive_aes_key(priv_key)
+                
+                for f in os.listdir(sig_dir):
+                    if f.startswith('.') or f.endswith(('.old', '.tmp', '.part', '.bak')):
+                        continue
+                        
+                    src_f = os.path.join(sig_dir, f)
+                    dst_f = os.path.join(hydration_dir, f)
+                    
+                    try:
+                        if f.endswith(('.hdb', '.ndb')):
+                            # Unscramble into RAM
+                            with open(src_f, "rb") as sf:
+                                unscrambled = xor_buffer(sf.read(), xor_key)
+                            with open(dst_f, "wb") as df:
+                                df.write(unscrambled)
+                        elif f.endswith(('.yar', '.cvd')):
+                            # Copy others directly
+                            shutil.copy2(src_f, dst_f)
+                    except Exception as fe:
+                        log_debug(f"HYDRATION WARNING: Failed to hydrate {f}: {fe}")
+                
+                current_sig_dir = hydration_dir
+            except Exception as e:
+                log_debug(f"HYDRATION FAILURE: Falling back to disk (may fail): {e}")
 
         cmd = [path, '--no-summary']
         if is_daemon:
@@ -1836,7 +2061,7 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
             # Archive Depth Control (Standard Scan only, clamd uses config)
             cmd.extend([f'--max-recursion={_MAX_RECURSION_DEPTH}'])
             if has_custom_sigs:
-                cmd.extend(['-d', sig_dir])
+                cmd.extend(['-d', current_sig_dir])
             
         if pua_enabled:
             # Aggressive PUA detection, but exclude NetTool to avoid overkill on utilities
@@ -1850,6 +2075,10 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
         except subprocess.TimeoutExpired:
             log_debug(f"CORE TIMEOUT: Scan of {actual_path} exceeded {_GLOBAL_TIMEOUT}s")
             return {"status": "error", "error": _("Scan timeout after {timeout}s").format(timeout=_GLOBAL_TIMEOUT), "timeout": True}
+        finally:
+            # Aggressive Cleanup: Wipe RAM-disk signatures
+            if hydration_dir and os.path.exists(hydration_dir):
+                shutil.rmtree(hydration_dir, ignore_errors=True)
         
         result = {"target": actual_path}
         
@@ -2005,11 +2234,15 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 log_file = os.path.join(log_dir, "alert_log.txt")
                 
                 # Formatting the log entry for readability
-                timestamp = incident.get("time", "N/A")
-                reason = incident.get("reason", "Unknown Threat")
-                url = incident.get("url", "N/A")
-                hostname = incident.get("hostname", "N/A")
+                # SECURITY: Sanitize all browser-provided strings to prevent log injection
+                timestamp = str(incident.get("time", "N/A")).replace("\n", " ").replace("\r", " ")
+                reason = str(incident.get("reason", "Unknown Threat")).replace("\n", " ").replace("\r", " ")
+                url = str(incident.get("url", "N/A")).replace("\n", " ").replace("\r", " ")
+                hostname = str(incident.get("hostname", "N/A")).replace("\n", " ").replace("\r", " ")
                 forensics = incident.get("forensics")
+                
+                if isinstance(forensics, str):
+                    forensics = forensics.replace("\n", " ").replace("\r", " ")
                 
                 log_entry = f"[{timestamp}] ALERT: {reason}\n"
                 log_entry += f"  Target: {hostname} ({url})\n"
@@ -2094,7 +2327,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
             try:
                 # Trigger freshclam
                 if _BIN_FRESHCLAM:
-                    process = subprocess.run([_BIN_FRESHCLAM], capture_output=True, text=True)
+                    process = subprocess.run([_BIN_FRESHCLAM], capture_output=True, text=True, timeout=120)
                 else:
                     log_debug("freshclam not found in PATH — database update skipped.")
                     return {"status": "error", "error": "freshclam not found"}
@@ -2115,13 +2348,26 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                         send_message({"status": "ok", "msg": _("YARA already current (Polite limit active)")})
                         return
 
-                sanitizer_path = os.path.join(os.path.dirname(__file__), "yara_sanitizer.py")
+                # Privacy: Use the configured Tor/VPN proxy for YARA updates
+                proxies = None
+                if config.get("enforce_privacy"):
+                    proxies = {
+                        "http": "socks5h://127.0.0.1:9050",
+                        "https": "socks5h://127.0.0.1:9050"
+                    }
+
+                sanitizer = YaraSanitizer(sig_dir)
                 # Run in background to avoid blocking
-                process = subprocess.run([sys.executable, sanitizer_path], capture_output=True, text=True, timeout=180)
-                if process.returncode == 0:
-                    send_message({"status": "ok", "msg": _("YARA Signatures Synced & Sanitized")})
-                else:
-                    send_message({"status": "error", "error": _("Sanitizer Error: {err}").format(err=process.stderr[:200])})
+                def run_sync():
+                    YARA_FORGE_CORE = "https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-core.zip"
+                    success, msg = sanitizer.sync_from_url(YARA_FORGE_CORE, "yara_forge_filtered.yar", proxies=proxies)
+                    if success:
+                        log_debug(f"YARA Sync Success: {msg}")
+                    else:
+                        log_debug(f"YARA Sync Failed: {msg}")
+
+                threading.Thread(target=run_sync, daemon=True).start()
+                send_message({"status": "ok", "msg": _("YARA Sync Started in Background")})
             except Exception as e:
                 send_message({"status": "error", "error": _("Bridge Error: {err}").format(err=str(e))})
         elif action == "reseal":
@@ -2145,7 +2391,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                     if config.get("ert_enabled"):
                         ert_signer = os.path.join(os.path.dirname(__file__), "ert_signer.py")
                         if os.path.exists(ert_signer):
-                             subprocess.run([sys.executable, ert_signer], check=False)
+                             subprocess.run([sys.executable, ert_signer], check=False, timeout=30)
                     
                     send_message({"status": "ok", "msg": _("Engine Re-Sealed with Root Authority")})
                 else:
@@ -2166,13 +2412,12 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 send_message({"status": "error", "error": str(e)})
         elif action == "list_quarantine":
             try:
-                quarantine_dir = os.path.join(os.path.dirname(__file__), "quarantine")
-                if not os.path.exists(quarantine_dir):
+                if not os.path.exists(_QUARANTINE_DIR):
                     send_message({"status": "ok", "files": []})
                     return
                 files = []
-                for f in os.listdir(quarantine_dir):
-                    fpath = os.path.join(quarantine_dir, f)
+                for f in os.listdir(_QUARANTINE_DIR):
+                    fpath = os.path.join(_QUARANTINE_DIR, f)
                     files.append({
                         "name": f,
                         "size": os.path.getsize(fpath),
@@ -2200,6 +2445,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 send_message({"status": "error", "error": str(e)})
         elif action == "check":
             try:
+                global _secret_issued
                 log_debug("CHECK ACTION STARTED")
                 installed, path, is_daemon = check_clamav()
                 run_dir = get_run_dir()
@@ -2262,8 +2508,8 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                         "vpn": vpn_name if vpn_active else None,
                         "tor": tor_active
                     },
-                    "secret": secret if (not received_secret or received_secret != secret) else "****", 
-                    "honeypot_secret": hp_secret,
+                    "secret": secret if (not _secret_issued and (not received_secret or received_secret != secret)) else "****", 
+                    "honeypot_secret": hp_secret if (not _secret_issued or (received_secret and secret and received_secret == secret)) else "****",
                     "integrity_ok": (current_hash == stored_hash) if stored_hash else True,
                     "binary_ok": binary_ok,
                     "env_ok": verify_environment(),
@@ -2279,6 +2525,10 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 }
                 log_debug("CHECK ACTION COMPLETED")
                 send_message(status_msg)
+                
+                # SECURITY: Mark secret as issued so it's never sent again
+                if status_msg.get("secret") != "****":
+                    _secret_issued = True
             except Exception as e:
                 log_debug(f"Internal Check error: {e}")
                 send_message({"status": "error", "error": f"Check logic failed: {e}"})
@@ -2332,31 +2582,44 @@ def graceful_shutdown(signum, frame):
     sys.exit(0)
 
 def cleanup_stale_quarantine():
-    """Crash Trap Fix: Restore access to any files left in quarantine by an OOM killer or segfault."""
+    """Crash Trap Fix: Restore access to any files left in quarantine or locked by an OOM killer or segfault."""
     try:
         downloads_dir = os.path.expanduser("~/Downloads")
-        quarantine_dir = os.path.join(downloads_dir, ".clamfox_quarantine")
-        
-        if not os.path.exists(quarantine_dir):
-            return
-            
         now = time.time()
-        for filename in os.listdir(quarantine_dir):
-            filepath = os.path.join(quarantine_dir, filename)
-            if not os.path.isfile(filepath):
-                continue
+
+        # 1. Recover files stuck in Quarantine
+        if os.path.exists(_QUARANTINE_DIR):
+            for filename in os.listdir(_QUARANTINE_DIR):
+                filepath = os.path.join(_QUARANTINE_DIR, filename)
+                if not os.path.isfile(filepath): continue
                 
-            # If a file has been stuck here for more than 1 hour (3600 seconds)
-            if os.path.getmtime(filepath) < now - 3600:
-                log_debug(f"Crash Trap: Recovering abandoned file {filename}")
-                os.chmod(filepath, 0o644) # Unlock
-                safe_dest = os.path.join(downloads_dir, filename)
-                import shutil
-                shutil.move(filepath, safe_dest) # Evict
+                # If a file has been stuck here for more than 1 hour
+                if os.path.getmtime(filepath) < now - 3600:
+                    log_debug(f"Crash Trap: Recovering abandoned quarantine {filename}")
+                    os.chmod(filepath, 0o644) # Unlock
+                    safe_dest = os.path.join(downloads_dir, filename)
+                    import shutil
+                    shutil.move(filepath, safe_dest) # Evict
+
+        # 2. Recover files stuck in Download with 000 permissions (Stale Locks)
+        if os.path.exists(downloads_dir):
+            for filename in os.listdir(downloads_dir):
+                filepath = os.path.join(downloads_dir, filename)
+                if not os.path.isfile(filepath): continue
+                
+                # Check for 0o000 mode (locked by ClamFox)
+                stat = os.stat(filepath)
+                if (stat.st_mode & 0o777) == 0:
+                    if stat.st_mtime < now - 3600:
+                        log_debug(f"Crash Trap: Restoring permissions to stale lock {filename}")
+                        os.chmod(filepath, 0o644)
     except Exception as e:
-        log_debug(f"Failed to cleanup stale quarantine: {e}")
+        log_debug(f"Failed to cleanup stale locks: {e}")
 
 def main():
+    # 0. Opportunistic Sandboxing (Security Layer 0)
+    try_opportunistic_sandboxing()
+    
     log_debug("Host script started (Persistent Mode)")
     
     # Run startup garage collection to prevent permanent Crash Traps
@@ -2394,11 +2657,20 @@ def main():
             log_debug(f"ERT Verification Error: {e}")
             sys.exit(1)
 
-    # 2. Integrity Check (Legacy Hash Fallback)
-    if stored_hash:
-        if current_hash != stored_hash:
-            log_debug("🛑 SECURITY ALERT: SCRIPT HASH MISMATCH! Post-install tampering detected.")
-            # Still run, but let extension decide if it trusts the secret unmasked.
+    # 3. Supply-Chain Canary Audit
+    verify_canary_integrity()
+
+    # 4. Starting Runtime Integrity Sentinel
+    capture_runtime_snapshots()
+    threading.Thread(target=runtime_integrity_sentinel, daemon=True).start()
+
+    # 5. FS-Verity Kernel Audit
+    verify_kernel_integrity()
+
+    # 6. Security Lockdown: Poisoning pickle after all initializations
+    sys.modules['pickle'] = None
+    sys.modules['_pickle'] = None
+    sys.modules['cPickle'] = None
 
     # Persistent Bridge Loop
     while True:

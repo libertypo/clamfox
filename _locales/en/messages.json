@@ -107,11 +107,11 @@
     "ghostHint": {
         "message": "Disable ALL external API lookups"
     },
-    "promptShieldLabel": {
-        "message": "Prompt Injection Shield"
+    "commandShieldLabel": {
+        "message": "Hidden Command Shield"
     },
-    "promptShieldHint": {
-        "message": "Block hidden prompt injections & field hijacking"
+    "commandShieldHint": {
+        "message": "Block hidden command injections & field hijacking"
     },
     "intelSyncSection": {
         "message": "Intelligence Sync"
@@ -248,10 +248,10 @@
     "safeBrowsingHint": {
         "message": "Remember to avoid suspicious ads or fishy emails."
     },
-    "promptInjectionRisk": {
-        "message": "Prompt Injection Risk"
+    "commandInjectionRisk": {
+        "message": "Hidden Command Risk"
     },
-    "promptInjectionMessage": {
+    "commandInjectionMessage": {
         "message": "SECURITY: Page contains invisible instructions."
     },
     "inputHijackBlocked": {
