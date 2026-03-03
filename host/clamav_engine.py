@@ -1736,7 +1736,7 @@ def check_certificate_age(domain):
                     try:
                         dt = datetime.datetime.strptime(entry_date.split('T')[0], '%Y-%m-%d')
                         issue_dates.append(dt)
-                    except: continue
+                    except Exception: continue
             
             if not issue_dates: return None
             
@@ -1885,7 +1885,7 @@ def start_clipper_shield():
                     else:
                         last_asset = None
                         last_time = time.time()
-            except: pass
+            except Exception: pass
             time.sleep(0.4) # Fast poll (<0.5s) to accurately measure swap speed
     
     t = threading.Thread(target=monitor, daemon=True)
@@ -1974,7 +1974,7 @@ def check_url_reputation(url):
                 if cert_age is not None and cert_age < 30:
                     threat_desc = f"{hvt_reason} + {_('Suspicious New Certificate')} ({cert_age} {_('days old')})"
                     return {"status": "malicious", "threat": threat_desc, "url": target, "confirmed": True} # UPGRADED TO CONFIRMED
-            except: pass
+            except Exception: pass
             
             return {"status": "malicious", "threat": hvt_reason, "url": target, "confirmed": False}
     
@@ -2001,7 +2001,7 @@ def check_url_reputation(url):
                 if domain == brand or domain.endswith("." + brand):
                     is_trusted = True
                     break
-    except: pass
+    except Exception: pass
     
     return {"status": "clean", "url": final_url, "trust": "high" if is_trusted else "standard"}
 
@@ -2083,6 +2083,7 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
                 # Create a temporary directory in /dev/shm (RAM-disk)
                 shm_base = "/dev/shm" if os.path.exists("/dev/shm") else None
                 hydration_dir = tempfile.mkdtemp(prefix="clamfox_sigs_", dir=shm_base)
+                os.chmod(hydration_dir, 0o700)  # R-1: Explicit lock — mkdtemp is 0700 by convention but not guaranteed
                 
                 priv_key = get_or_create_machine_key()
                 xor_key = derive_aes_key(priv_key)
