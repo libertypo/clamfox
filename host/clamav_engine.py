@@ -1423,7 +1423,7 @@ def verify_timelock(file_path):
                     log_debug(f"🛑 CRITICAL FREEZE: {os.path.basename(file_path)} is too old! Disabling engine.")
                     return False
             return True
-        except: return False
+        except Exception: return False
         
     except Exception as e:
         log_debug(f"verify_timelock Exception: {e}")

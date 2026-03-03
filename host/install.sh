@@ -72,7 +72,7 @@ if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
 
     echo "⚙️  Automatically installing missing dependencies using $PKG_MANAGER..."
     if [[ -n "$update_cmd" ]]; then $update_cmd; fi
-    $PKG_MANAGER ${MISSING_DEPS[*]}
+    $PKG_MANAGER "${MISSING_DEPS[@]}"
 else
     echo "✅ All dependencies present."
 fi

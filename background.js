@@ -750,12 +750,15 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
     const storage = await browser.storage.local.get({ blockedHistory: [] });
     const blocks = storage.blockedHistory;
 
+    let incidentHostname = url;
+    try { incidentHostname = new URL(url).hostname; } catch (e) { /* non-HTTP url — keep raw value */ }
+
     const incident = {
         name: name,
         status: "blocked",
         reason: reason,
         url: url,
-        hostname: new URL(url).hostname,
+        hostname: incidentHostname,
         time: new Date().toISOString(),
         tabId: tabId,
         reported: false,
