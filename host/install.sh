@@ -250,6 +250,23 @@ cat <<EOF > "$POLICY_DIR/policies.json"
 }
 EOF
 
+# 8.5 Initial YARA Signature Sync
+echo "📡 Syncing YARA community rules (background, may take a moment)..."
+YARA_URL="https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-core.zip"
+SIG_DIR="$INSTALL_DIR/signatures"
+python3 - <<PYEOF 2>/dev/null &
+import sys
+sys.path.insert(0, '$INSTALL_DIR')
+try:
+    from yara_sanitizer import YaraSanitizer
+    s = YaraSanitizer('$SIG_DIR')
+    ok, msg = s.sync_from_url('$YARA_URL', 'yara-rules-core.yar')
+    # Silent: do not print — stdout is captured by shell, not native messaging
+except Exception:
+    pass
+PYEOF
+echo "   (YARA sync running in background — rules will be ready shortly)"
+
 # 9. Mandatory Access Control (AppArmor/SELinux)
 # ─────────────────────────────────────────────────────────────────────────────
 # ⚠️  SECURITY RISK NOTICE (Audit finding L-4):

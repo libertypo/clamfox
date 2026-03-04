@@ -376,7 +376,6 @@ async function checkEngine() {
 
     try {
         response = await browser.runtime.sendMessage({ action: "proxy_check" });
-        console.log("ClamFox Diagnostic: Received engine status:", response);
 
         if (response && response.status === "ok") {
             const isTampered = (response.integrity_ok === false || response.binary_ok === false);
