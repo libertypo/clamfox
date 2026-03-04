@@ -335,10 +335,87 @@ async function sendNativeMessageWithTimeout(hostname, message, timeoutMs = 8000)
     const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Native Messaging request timed out")), timeoutMs)
     );
-    return Promise.race([
+    const response = await Promise.race([
         browser.runtime.sendNativeMessage(hostname, message),
         timeoutPromise
     ]);
+
+    // 🛡️ SECURITY: Scrutinize every response from the native host
+    try {
+        validateNativeResponse(message.action, response);
+    } catch (e) {
+        console.error(`🛡️ NATIVE MESSAGE VALIDATION FAILURE [${message.action}]:`, e);
+        throw new Error(`Security validation failed for host response: ${e.message}`);
+    }
+
+    return response;
+}
+
+/**
+ * Validates incoming host messages against expected schemas to prevent 
+ * exploitation of the extension logic via malformed responses.
+ */
+function validateNativeResponse(action, response) {
+    if (!response || typeof response !== "object" || Array.isArray(response)) {
+        throw new Error("Invalid response format: Not a structured object");
+    }
+
+    // 1. Generic Schema Verification
+    const rootSchema = {
+        action: "string",
+        status: "string",
+        secret: "string",
+        error: "string",
+        integrity_ok: "boolean",
+        binary_ok: "boolean",
+        honeypot_secret: "string"
+    };
+
+    for (const [key, expectedType] of Object.entries(rootSchema)) {
+        const val = response[key];
+        if (val !== undefined && val !== null) {
+            if (typeof val !== expectedType) {
+                throw new Error(`Type mismatch for '${key}': expected ${expectedType}, got ${typeof val}`);
+            }
+            // Constraint: no string in the root schema should exceed common sense limits
+            if (expectedType === "string" && val.length > 2048 && key !== "error") {
+                throw new Error(`String field '${key}' exceeds maximum permitted length (2KB)`);
+            }
+        }
+    }
+
+    // 2. Action-Specific Schema Hardening
+    switch (action) {
+        case "scan":
+        case "scan_request":
+            if (response.status === "malicious") {
+                if (typeof response.threat !== "string" || response.threat.length > 256) {
+                    throw new Error("Invalid 'threat' identifier in discovery response");
+                }
+            }
+            if (response.forensics && typeof response.forensics !== "object") {
+                throw new Error("Forensic payload must be a structured object");
+            }
+            break;
+        case "get_intel":
+            if (response.hvts && !Array.isArray(response.hvts)) {
+                throw new Error("'hvts' data must be an array");
+            }
+            break;
+        case "get_audit_logs":
+        case "list_quarantine":
+            if (response.logs && !Array.isArray(response.logs)) {
+                throw new Error("Log data must be an array of entries");
+            }
+            break;
+        case "clipper_alert":
+            if (typeof response.old !== "string" || typeof response.new !== "string") {
+                throw new Error("Clipper alert missing required address fields");
+            }
+            break;
+    }
+
+    return true;
 }
 
 async function getSecret(forceRefresh = false) {
@@ -1428,18 +1505,25 @@ async function initBackgroundBridge() {
     try {
         backgroundPort = browser.runtime.connectNative(NATIVE_HOST_NAME);
         backgroundPort.onMessage.addListener(async (msg) => {
-            if (msg.action === "clipper_alert") {
-                console.warn("🛡️ CLIPPER SHIELD: Hijack detected!", msg);
-                browser.notifications.create({
-                    type: "basic",
-                    iconUrl: "icons/warning.svg",
-                    title: "⚠️ CLIPBOARD HIJACK BLOCKED",
-                    message: browser.i18n.getMessage("clipperShieldAlert") || "A malicious script tried to swap your crypto address!",
-                    priority: 2
-                });
+            try {
+                // 🛡️ SECURITY: Validate unsolicited messages from the host
+                validateNativeResponse(msg.action || "background_alert", msg);
 
-                // Log it to history
-                logBlock("System Clipboard", msg.threat || "Crypto-Address Hijacking", msg.new);
+                if (msg.action === "clipper_alert") {
+                    console.warn("🛡️ CLIPPER SHIELD: Hijack detected!", msg);
+                    browser.notifications.create({
+                        type: "basic",
+                        iconUrl: "icons/warning.svg",
+                        title: "⚠️ CLIPBOARD HIJACK BLOCKED",
+                        message: browser.i18n.getMessage("clipperShieldAlert") || "A malicious script tried to swap your crypto address!",
+                        priority: 2
+                    });
+
+                    // Log it to history
+                    logBlock("System Clipboard", msg.threat || "Crypto-Address Hijacking", msg.new);
+                }
+            } catch (e) {
+                console.error("🛡️ SECURITY ALERT: Rejected malformed background alert from host:", e, msg);
             }
         });
 
