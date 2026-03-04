@@ -800,6 +800,21 @@ browser.webRequest.onBeforeRequest.addListener(
 
 
 const THREAT_RATE_LIMITER = new Map();
+const ALERT_THROTTLE_MS = 5000; // 5 seconds between alerts for same domain
+
+function shouldThrottleAlert(domain) {
+    if (!domain) return false;
+    const key = `alert:${domain}`;
+    const now = Date.now();
+    const lastAlert = THREAT_RATE_LIMITER.get(key);
+
+    if (lastAlert && (now - lastAlert) < ALERT_THROTTLE_MS) {
+        return true; // Throttle
+    }
+
+    THREAT_RATE_LIMITER.set(key, now);
+    return false;
+}
 
 async function logBlock(name, reason, url, tabId = null, forensicData = null) {
     // 1. DEDUPLICATION: Prevent reporting the same threat for the same URL in the last 10 seconds
@@ -1224,7 +1239,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const host = sender.tab ? new URL(sender.tab.url).hostname : null;
             logBlock("Honeypot Decoy Tripped", message.threat, sender.tab ? sender.tab.url : "Unknown URL", sender.tab ? sender.tab.id : null, message.forensics);
 
-            if (!isWhitelisted(host)) {
+            if (!isWhitelisted(host) && !shouldThrottleAlert(host)) {
                 browser.notifications.create({
                     type: "basic",
                     iconUrl: "icons/warning.svg",
@@ -1238,7 +1253,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const host = sender.tab ? new URL(sender.tab.url).hostname : null;
             logBlock("Formjacking Detected", message.threat, sender.tab ? sender.tab.url : "Unknown URL", sender.tab ? sender.tab.id : null, message.forensics);
 
-            if (!isWhitelisted(host)) {
+            if (!isWhitelisted(host) && !shouldThrottleAlert(host)) {
                 browser.notifications.create({
                     type: "basic",
                     iconUrl: "icons/warning.svg",
@@ -1252,7 +1267,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const host = sender.tab ? new URL(sender.tab.url).hostname : null;
             logBlock("Visual Phishing Detected", message.threat, sender.tab ? sender.tab.url : "Unknown URL", sender.tab ? sender.tab.id : null, message.forensics);
 
-            if (!isWhitelisted(host)) {
+            if (!isWhitelisted(host) && !shouldThrottleAlert(host)) {
                 browser.notifications.create({
                     type: "basic",
                     iconUrl: "icons/warning.svg",
@@ -1266,7 +1281,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const host = sender.tab ? new URL(sender.tab.url).hostname : null;
             logBlock("Drive-by Download Detected", message.threat, sender.tab ? sender.tab.url : "Unknown URL", sender.tab ? sender.tab.id : null, message.forensics);
 
-            if (!isWhitelisted(host)) {
+            if (!isWhitelisted(host) && !shouldThrottleAlert(host)) {
                 browser.notifications.create({
                     type: "basic",
                     iconUrl: "icons/warning.svg",
@@ -1280,7 +1295,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const host = sender.tab ? new URL(sender.tab.url).hostname : null;
             logBlock("Malicious Behavior Detected", message.threat, sender.tab ? sender.tab.url : "Unknown URL", sender.tab ? sender.tab.id : null, message.forensics);
 
-            if (!isWhitelisted(host)) {
+            if (!isWhitelisted(host) && !shouldThrottleAlert(host)) {
                 browser.notifications.create({
                     type: "basic",
                     iconUrl: "icons/warning.svg",
@@ -1294,7 +1309,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const host = sender.tab ? new URL(sender.tab.url).hostname : null;
             logBlock("DOM Anomaly / Clickjacking Overlay", message.threat, sender.tab ? sender.tab.url : "Unknown URL", sender.tab ? sender.tab.id : null, message.forensics);
 
-            if (!isWhitelisted(host)) {
+            if (!isWhitelisted(host) && !shouldThrottleAlert(host)) {
                 browser.notifications.create({
                     type: "basic",
                     iconUrl: "icons/warning.svg",
