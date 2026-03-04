@@ -1,5 +1,5 @@
 # ClamFox
-Firefox extension to filter traffic and downloads
+Firefox extension to filter traffic and scan downloads using ClamAV.
 
 ## 🛡️ Hybrid Architecture
 ClamFox supports a **Dual-Mode** deployment:
@@ -8,74 +8,57 @@ ClamFox supports a **Dual-Mode** deployment:
 
 ---
 
-==================================================
-CLAMFOX - PRIVACY ARCHITECTURE SUMMARY
-==================================================
+## 🔒 Privacy First
 
-This extension was designed with a "Privacy-First" model, 
-aiming to provide protection without the massive 
-data collection typical of commercial software.
-All due dilligence was exerted to insure no private data
-is neither collected nor transmited outside the local 
-context of execution.
+ClamFox is designed with a "Privacy-First" model — protection without data collection.
 
---------------------------------------------------
-                THE PRIVACY
---------------------------------------------------
+- **100% local file scanning** — files are never uploaded; ClamAV runs on your CPU.
+- **Local threat cache** — the full URLhaus blocklist is downloaded to your disk. Zero URLs are sent to external servers during browsing.
+- **Local-only history** — block history and scan logs live exclusively in browser local storage; never synced.
+- **Secure handshake** — a machine-unique cryptographic secret is generated at install time; only your extension can talk to your scanner bridge.
+- **No accounts or tracking** — no registration, no analytics, no telemetry, no user ID.
+- **Open source** — all browser↔host communication is visible in this repository.
 
-1. 100% LOCAL FILE SCANNING (ClamAV)
-   - Unlike cloud AVs, your files are NEVER uploaded to a server
-     for analysis. Scanning happens entirely on your CPU.
-   
-2. PRIVATE BROWSING PROTECTION (URLhaus Local Cache)
-   - Your web history is 100% private. 
-   - We download the entire malware blocklist to your SSD. 
-   - Every site you visit is checked against this local file.
-   - ZERO URLs are sent to URLhaus/abuse.ch during browsing.
-   - "Strict Blocking" mode ensures the site is checked BEFORE 
-     the browser even connects to the server. No more "flash" of 
-     malicious content.
+> See [PRIVACY_SUMMARY.txt](PRIVACY_SUMMARY.txt) for a full privacy architecture summary including known trade-offs.
 
-3. LOCAL-ONLY BLOCK HISTORY
-   - The "Block History" and scan logs are stored EXCLUSIVELY in 
-     your browser's local storage. This data is never synced
-     to the cloud or shared with third parties.
-
-4. SECURE HANDSHAKE & ANTI-TAMPER
-   - A unique, cryptographically random secret is generated on 
-     your machine during install. This "Handshake" ensures that 
-     only the extension can talk to your scanner bridge.
-   - Host script integrity is verified locally before any scan.
-
-5. NO USER ACCOUNTS OR TRACKING
-   - No registration, no analytics, and no telemetry.
-   - The extension does not generate a unique User ID.
-
-6. OPEN SOURCE & TRANSPARENT
-   - All communication between the browser and the host is 
-     visible in the project code (Python/JS).
-
---------------------------------------------------
-                 🚀 SETUP & DEPLOYMENT
---------------------------------------------------
-
-1. **Prerequisites**: Python 3.8+, ClamAV (clamscan), and standard Linux build tools.
-2. **Setup**:
-   - Run `cd host && ./install.sh` to register the native messaging host.
-   - This generates a machine-unique secret and registers the JSON manifest.
-3. **Hardware Trust (ERT)**:
-   - If a TPM 2.0 is present, the engine will attempt to use it for hardware-anchored module signing.
-4. **Build**:
-   - Run `./package.sh` to generate production-ready `.xpi` and source bundles.
-   - This script automatically injects unique supply-chain canaries.
-
---------------------------------------------------
-                  ⚖️ LICENSE
---------------------------------------------------
-This project is licensed under the [GNU General Public License v3](LICENSE).
+---
 
 ## 📦 Requirements
-- **OS**: Linux (standard, Snap, and Flatpak supported).
-- **Engine**: ClamAV (`clamd` supported).
-- **Native**: Python 3.8+.
-- **Browser**: Firefox 128+ (ESR supported).
+
+| Component | Minimum |
+|-----------|---------|
+| OS        | Linux (standard, Snap, and Flatpak supported) |
+| Browser   | Firefox 128+ (ESR supported) |
+| Engine    | ClamAV (`clamscan` or `clamd`) |
+| Native    | Python 3.8+ |
+
+---
+
+## 🚀 Setup & Deployment
+
+```bash
+# 1. Register the native messaging host (generates machine-unique secret)
+cd host && ./install.sh
+
+# 2. (Optional) Build the WASM shield from source
+./build_wasm.sh
+
+# 3. Package for distribution
+./package.sh   # produces .xpi and AMO source bundles
+```
+
+**Hardware Trust (ERT)**: If a TPM 2.0 is present, the engine uses it for hardware-anchored module signing.
+
+---
+
+## ⚖️ License
+
+GNU General Public License v3 — see [LICENSE](LICENSE).
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security vulnerability privately, see [SECURITY.md](SECURITY.md).
+
+## 📋 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a full history of changes.
