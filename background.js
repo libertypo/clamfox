@@ -733,15 +733,26 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
     }
     THREAT_RATE_LIMITER.set(dedupKey, Date.now());
 
-    // 2. RATE LIMITING: Max 5 incidents per minute per tab
-    if (tabId) {
+    // 2. GLOBAL RATE LIMITING: Max 20 incidents per minute across all tabs (EDR Hardening)
+    const globalKey = "rate:global:incidents";
+    let globalHistory = THREAT_RATE_LIMITER.get(globalKey) || [];
+    const now = Date.now();
+    globalHistory = globalHistory.filter(t => (now - t) < 60000); // 1 minute window
+    if (globalHistory.length >= 20) {
+        console.error(`🛡️ GLOBAL RATE LIMITER: Security incident cap reached (20/min). Possible multi-tab attack or high-volume noise.`);
+        return { status: "ignored", reason: "global_rate_limit_exceeded" };
+    }
+    globalHistory.push(now);
+    THREAT_RATE_LIMITER.set(globalKey, globalHistory);
+
+    // 3. PER-TAB RATE LIMITING: Max 5 incidents per minute per tab
+    if (tabId && tabId !== -1) {
         const tabKey = `rate:tab:${tabId}`;
         let tabHistory = THREAT_RATE_LIMITER.get(tabKey) || [];
-        const now = Date.now();
         tabHistory = tabHistory.filter(t => (now - t) < 60000);
         if (tabHistory.length >= 5) {
-            console.warn(`🛡️ RATE LIMITER: Ignoring security incident from tab ${tabId} (Limit reached)`);
-            return { status: "ignored", reason: "rate_limit_exceeded" };
+            console.warn(`🛡️ TAB RATE LIMITER: Ignoring security incident from tab ${tabId} (Limit reached)`);
+            return { status: "ignored", reason: "tab_rate_limit_exceeded" };
         }
         tabHistory.push(now);
         THREAT_RATE_LIMITER.set(tabKey, tabHistory);
