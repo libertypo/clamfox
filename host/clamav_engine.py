@@ -82,6 +82,9 @@ _config_lock = threading.Lock()
 _output_lock = threading.Lock()
 
 # Global Caches (Initialized as None)
+_BINARY_INTEGRITY_CACHE = {"path": None, "hash": None, "timestamp": 0}
+_BINARY_CACHE_TTL = 60  # Cache verification results for 60 seconds
+
 _url_cache = None
 _url_domain_cache = None
 _cache_last_loaded = 0
@@ -656,28 +659,38 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
         log_debug(f"NETWORK TIMEOUT: {url}")
         return False
 
-def check_clamav():
+def check_clamav(verify=False):
+    """
+    Locate ClamAV binaries and optionally verify their integrity.
+    If verify=True, the binary hash is checked against the config.
+    """
     # Prefer clamdscan (Daemon) for performance, fallback to clamscan
+    config = load_config()
+    stored_hash = config.get("binary_hash")
 
     # Hardened resolution
-    clamdscan_path = "/usr/bin/clamdscan" if os.path.exists("/usr/bin/clamdscan") else shutil.which("clamdscan")
-    if clamdscan_path:
-        log_debug(f"Detected ClamD: {clamdscan_path}")
-        return True, clamdscan_path, True
-        
-    clamscan_path = "/usr/bin/clamscan" if os.path.exists("/usr/bin/clamscan") else shutil.which("clamscan")
-    if clamscan_path:
-        log_debug(f"Detected ClamScan: {clamscan_path}")
-        return True, clamscan_path, False
-        
-    log_debug("ClamAV binaries not found in PATH")
-    # Search common paths manually if PATH is restricted
-    fallbacks = ["/usr/local/bin/clamscan", "/usr/bin/clamdscan"] # /usr/bin already checked above
-    for fb in fallbacks:
-        if os.path.exists(fb) and os.access(fb, os.X_OK):
-            log_debug(f"Detected ClamAV via fallback: {fb}")
-            return True, fb, ("clamd" in fb)
+    path_candidates = [
+        ("/usr/bin/clamdscan", True),
+        ("/usr/bin/clamscan", False),
+        ("/usr/local/bin/clamdscan", True),
+        ("/usr/local/bin/clamscan", False)
+    ]
+    
+    # Add shutil.which fallbacks
+    for name in ["clamdscan", "clamscan"]:
+        w_path = shutil.which(name)
+        if w_path and w_path not in [c[0] for c in path_candidates]:
+            path_candidates.append((w_path, "clamd" in name))
 
+    for path, is_daemon in path_candidates:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            if verify:
+                if not verify_binary_integrity(path, stored_hash):
+                    log_debug(f"SECURITY: Binary verification failed for {path}")
+                    continue
+            return True, path, is_daemon
+
+    log_debug("ClamAV binaries not found or verification failed")
     return False, None, False
 
 def KEYRING_NAME(): return "ClamFox-Security-Vault"
@@ -907,27 +920,46 @@ def get_file_hash(filepath):
 
 def verify_binary_integrity(binary_path, stored_binary_hash=None):
     """Ensure the scanner is a real binary and matches the sealed version."""
+    global _BINARY_INTEGRITY_CACHE
     if not binary_path: return False
+    
+    # 0. Performance Cache Check
+    now = time.time()
+    if (_BINARY_INTEGRITY_CACHE["path"] == binary_path and 
+        _BINARY_INTEGRITY_CACHE["hash"] == stored_binary_hash and
+        (now - _BINARY_INTEGRITY_CACHE["timestamp"]) < _BINARY_CACHE_TTL):
+        return True
+
     try:
         # 1. Strict Path Check: Only allow system-wide binaries
-        allowed_prefixes = ["/usr/bin/", "/bin/", "/usr/local/bin/"]
-        is_safe_path = any(binary_path.startswith(p) for p in allowed_prefixes)
+        allowed_prefixes = ["/usr/bin/", "/bin/", "/usr/local/bin/", "/usr/sbin/"]
+        # Resolve symlinks for the path check to prevent bypass via symlinks in /tmp
+        real_bin_path = os.path.realpath(binary_path)
+        is_safe_path = any(real_bin_path.startswith(p) for p in allowed_prefixes)
         if not is_safe_path:
-            log_debug(f"SECURITY ALERT: Scanner binary at unsafe path: {binary_path}")
+            log_debug(f"SECURITY ALERT: Scanner binary at unsafe path: {binary_path} (real: {real_bin_path})")
             return False
 
         # 2. Check if it's an ELF binary
-        with open(binary_path, "rb") as f:
+        with open(real_bin_path, "rb") as f:
             header = f.read(4)
             if header != b"\x7fELF": return False
         
         # 3. Sealed Hash Check
         if stored_binary_hash:
-            current_hash = get_file_hash(binary_path)
+            current_hash = get_file_hash(real_bin_path)
             if current_hash != stored_binary_hash:
-                log_debug(f"SECURITY ALERT: Scanner binary hash mismatch! SEAL BROKEN.")
+                log_debug(f"SECURITY ALERT: Scanner binary hash mismatch for {real_bin_path}! SEAL BROKEN.")
                 return False
-                
+        
+        # Update Cache
+        _BINARY_INTEGRITY_CACHE = {
+            "path": binary_path,
+            "hash": stored_binary_hash,
+            "timestamp": now
+        }
+        return True
+        
         return True
     except Exception as e:
         log_debug(f"verify_binary_integrity failed: {e}")
@@ -1325,7 +1357,7 @@ def check_high_threat_container(filepath, deep_scan=False):
 def scan_file_basic(filepath):
     """Minimal, process-safe version of scan_file for parallel scaling."""
     try:
-        installed, path, is_daemon = check_clamav()
+        installed, path, is_daemon = check_clamav(verify=True)
         cmd = [path, '--no-summary']
         if is_daemon: cmd.extend(['--fdpass'])
         cmd.extend(['--', filepath])
@@ -2020,7 +2052,7 @@ def check_url_reputation(url):
     return {"status": "clean", "url": final_url, "trust": "high" if is_trusted else "standard"}
 
 def scan_file(filepath, use_mb=False, pua_enabled=True):
-    installed, path, is_daemon = check_clamav()
+    installed, path, is_daemon = check_clamav(verify=True)
     if not installed:
         return {"status": "error", "error": _("ClamAV not installed")}
     
@@ -2213,7 +2245,7 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
 
 def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
     send_message({"status": "progress", "percent": 10, "msg": _("Preparing scan...")})
-    installed, path, is_daemon = check_clamav()
+    installed, path, is_daemon = check_clamav(verify=True)
     if not installed:
         return {"status": "error", "error": _("ClamAV not found")}
         
@@ -2519,7 +2551,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
             try:
                 global _secret_issued
                 log_debug("CHECK ACTION STARTED")
-                installed, path, is_daemon = check_clamav()
+                installed, path, is_daemon = check_clamav(verify=True)
                 run_dir = get_run_dir()
                 url_db_path = os.path.join(run_dir, "urldb.txt")
                 if not os.path.exists(url_db_path):
