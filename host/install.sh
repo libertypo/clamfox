@@ -208,32 +208,6 @@ SCRIPT_PATH="$INSTALL_DIR/$HOST_NAME.py"
 sed "s|\"path\": \".*\"|\"path\": \"$SCRIPT_PATH\"|" "$MANIFEST_SRC" > "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE"
 chmod 644 "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE"
 
-# 7. Snap/Flatpak Bridge (Host registration)
-USER_HOME=$(eval echo "~$ACTUAL_USER")
-# Snap Firefox
-SNAP_DIR="$USER_HOME/snap/firefox/common/.mozilla/native-messaging-hosts"
-if [ -d "$USER_HOME/snap/firefox" ]; then
-    mkdir -p "$SNAP_DIR"
-    cp "$GLOBAL_MANIFEST_DIR/$MANIFEST_FILE" "$SNAP_DIR/"
-    chown -R "$ACTUAL_USER:$USER_GROUP" "$SNAP_DIR"
-fi
-# Flatpak Firefox
-FLATPAK_DIR="$USER_HOME/.var/app/org.mozilla.firefox/.mozilla/native-messaging-hosts"
-if [ -d "$USER_HOME/.var/app/org.mozilla.firefox" ]; then
-    echo "📦  Configuring Flatpak Firefox Bridge..."
-    mkdir -p "$FLATPAK_DIR"
-    WRAPPER_PATH="$INSTALL_DIR/clamav_host_wrapper.sh"
-    # Ensure wrapper exists in INSTALL_DIR
-    cp "$DIR/host/clamav_host_wrapper.sh" "$WRAPPER_PATH" 2>/dev/null || cp "$DIR/clamav_host_wrapper.sh" "$WRAPPER_PATH" 2>/dev/null
-    chmod 755 "$WRAPPER_PATH"
-    chown "root:root" "$WRAPPER_PATH"
-    
-    # Create Flatpak-specific manifest pointing to the WRAPPER
-    sed "s|\"path\": \".*\"|\"path\": \"$WRAPPER_PATH\"|" "$MANIFEST_SRC" > "$FLATPAK_DIR/$MANIFEST_FILE"
-    chmod 644 "$FLATPAK_DIR/$MANIFEST_FILE"
-    chown "$ACTUAL_USER:$USER_GROUP" "$FLATPAK_DIR/$MANIFEST_FILE"
-fi
-
 # 8. Managed Extension Sideloading (Enterprise Policy)
 echo "📦 Packaging and Sideloading Extension (Non-Forced)..."
 echo "   (Using 'normal_installed' mode to allow user control while ensuring availability)"

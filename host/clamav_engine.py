@@ -168,14 +168,6 @@ def try_opportunistic_sandboxing():
     if os.environ.get("CLAMFOX_SANDBOXED"):
         return
         
-    # Detect Flatpak / Snap (Nested sandboxing usually fails here)
-    is_flatpak = os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
-    is_snap = "SNAP" in os.environ
-    
-    if is_flatpak or is_snap:
-        log_debug("🛡️  SANDBOX: Container environment detected (Flatpak/Snap). Bypassing nested bwrap.")
-        return
-
     bwrap = shutil.which("bwrap")
     if not bwrap:
         log_debug("🛡️  SANDBOX: bubblewrap (bwrap) not found. Standard execution active.")

@@ -27,10 +27,13 @@ ClamFox is designed with a "Privacy-First" model — protection without data col
 
 | Component | Minimum |
 |-----------|---------|
-| OS        | Linux (standard, Snap, and Flatpak supported) |
+| OS        | Linux (Standard/Native) |
 | Browser   | Firefox 128+ (ESR supported) |
 | Engine    | ClamAV (`clamscan` or `clamd`) |
 | Native    | Python 3.8+ |
+
+> [!NOTE]
+> **Container Support**: Snap and Flatpak browsers are currently not supported for the host scan engine due to sandbox restrictions. Sorry folks, only native Firefox for now. Snap and Flatpak support is planned for future releases.
 
 ---
 
