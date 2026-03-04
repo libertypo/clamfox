@@ -589,6 +589,10 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
 
     if headers:
         for k, v in headers.items():
+            # 🛡️ SECURITY: Prevent curl flag injection in headers
+            if str(k).startswith('-') or str(v).startswith('-'):
+                log_debug(f"SECURITY ALERT: Blocked potential flag injection in header: {k}")
+                return False
             cmd.extend(['-H', f'{k}: {v}'])
 
     if tunnelled and tor_active:
@@ -596,7 +600,12 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
 
     if post_data:
         for k, v in post_data.items():
-            cmd.extend(['-d', f'{k}={v}'])
+            # 🛡️ SECURITY: Prevent curl flag injection in POST data keys/values
+            if str(k).startswith('-') or str(v).startswith('-'):
+                log_debug(f"SECURITY ALERT: Blocked potential flag injection in POST data: {k}")
+                return False
+            # Use --data-urlencode for improved safety and encoding
+            cmd.extend(['--data-urlencode', f'{k}={v}'])
 
     cmd.extend(['-o', output_path, '--', url])
     try:
