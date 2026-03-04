@@ -2,6 +2,11 @@
 const DEBUG = false;
 const dbg = (...args) => { if (DEBUG) console.log(...args); };
 
+if (!DEBUG) {
+    console.warn = () => { };
+    console.error = () => { };
+}
+
 // Supply-Chain Canary (Injected at build time)
 const CLAMFOX_CANARY = "PLACEHOLDER_CANARY";
 
@@ -854,13 +859,19 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
     const blocks = storage.blockedHistory;
 
     let incidentHostname = url;
-    try { incidentHostname = new URL(url).hostname; } catch (e) { /* non-HTTP url — keep raw value */ }
+    let maskedUrl = url;
+    try {
+        const parsedUrl = new URL(url);
+        incidentHostname = parsedUrl.hostname;
+        parsedUrl.search = ''; // Strip query parameters
+        maskedUrl = parsedUrl.href;
+    } catch (e) { /* non-HTTP url — keep raw value */ }
 
     const incident = {
         name: name,
         status: "blocked",
         reason: reason,
-        url: url,
+        url: maskedUrl,
         hostname: incidentHostname,
         time: new Date().toISOString(),
         tabId: tabId,

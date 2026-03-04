@@ -11,6 +11,12 @@ echo "Packaging ClamFox..."
 rm -f "$FULL_PACKAGE" "$AMO_SOURCE" "$XPI_FULL" "$XPI_STANDALONE"
 rm -rf build_full build_amo build_xpi_full build_xpi_standalone
 
+# Issue #6: Verify DEBUG mode is disabled
+if grep -q "const DEBUG = true;" background.js; then
+    echo "ERROR: DEBUG mode is enabled in background.js. Cannot package for production."
+    exit 1
+fi
+
 # 1. Create FULL package (for GitHub/Manual install)
 mkdir -p build_full
 cp -r background.js content.js content.css design_tokens.css manifest.json popup icons _locales host data wasm_shield README.md PRIVACY_SUMMARY.txt build_full/
@@ -20,6 +26,12 @@ BUILD_CANARY="cf_canary_$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 16)"
 echo "🛡️  Injecting Supply-Chain Canary: $BUILD_CANARY"
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_full/background.js
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_full/host/clamav_engine.py
+
+# Issue #9: Verify canary injection
+if grep -q "PLACEHOLDER_CANARY" build_full/background.js; then
+    echo "ERROR: Canary injection failed in FULL package!"
+    exit 1
+fi
 
 # WASM Integrity Injection
 WASM_FILE="wasm_shield/clamfox_shield.wasm"
@@ -47,6 +59,10 @@ cp -r background.js content.js content.css design_tokens.css popup icons _locale
 cp manifest_amo.json build_xpi_standalone/manifest.json
 mkdir -p build_xpi_standalone/META-INF
 cd build_xpi_standalone && sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" background.js
+if grep -q "PLACEHOLDER_CANARY" background.js; then
+    echo "ERROR: Canary injection failed in STANDALONE package!"
+    exit 1
+fi
 # WASM Integrity Injection for Standalone
 if [ -f "../$WASM_FILE" ]; then
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" background.js
@@ -65,6 +81,10 @@ rm -f build_xpi_full/host/decode_log.py
 rm -rf build_xpi_full/host/__pycache__
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_xpi_full/background.js
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_xpi_full/host/clamav_engine.py
+if grep -q "PLACEHOLDER_CANARY" build_xpi_full/background.js; then
+    echo "ERROR: Canary injection failed in FULL XPI!"
+    exit 1
+fi
 if [ -f "$WASM_FILE" ]; then
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_xpi_full/background.js
 fi
@@ -82,6 +102,10 @@ rm -f build_amo/host/decode_log.py
 rm -rf build_amo/host/__pycache__
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_amo/background.js
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_amo/host/clamav_engine.py
+if grep -q "PLACEHOLDER_CANARY" build_amo/background.js; then
+    echo "ERROR: Canary injection failed in AMO source!"
+    exit 1
+fi
 if [ -f "$WASM_FILE" ]; then
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_amo/background.js
 fi

@@ -577,8 +577,26 @@ _USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.199 Safari/537.36",
 ]
 
-def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=None):
+def mask_url(url):
+    """Remove query parameters from a URL for safe logging."""
+    try:
+        parsed = urlparse(url)
+        # Reconstruct URL without query and fragment
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    except Exception:
+        return "<malformed_url>"
+
+def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=None, https_only=True):
     """Fetch URL with optional Tor/VPN routing and leak protection."""
+    if https_only and not url.startswith('https://'):
+        if url.startswith('http://'):
+            https_url = url.replace('http://', 'https://', 1)
+            log_debug(f"SECURITY: Upgrading HTTP to HTTPS for fetch: {mask_url(url)} -> {mask_url(https_url)}")
+            url = https_url
+        else:
+            log_debug(f"SECURITY ALERT: Rejected non-HTTPS fetch attempt: {mask_url(url)}")
+            return False
+
     tunnelled = False
 
     if use_tunnel:
@@ -590,7 +608,7 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
             if vpn_active:
                 tunnelled = True
             elif _PRIVATE_TUNNEL_FORCE:
-                log_debug(f"PRIVACY ABORT: Tunnel requested but no VPN/Tor found for {url}")
+                log_debug(f"PRIVACY ABORT: Tunnel requested but no VPN/Tor found for {mask_url(url)}")
                 return False
 
     # When tunnelled, keep the branded UA so servers can identify the client
@@ -621,11 +639,18 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
 
     cmd.extend(['-o', output_path, '--', url])
     try:
-        process = subprocess.run(cmd, capture_output=True, timeout=_NETWORK_TIMEOUT)
-        return process.returncode == 0
+        res = subprocess.run(cmd, check=False, capture_output=True, timeout=_NETWORK_TIMEOUT)
+        if res.returncode == 0:
+            return True
+        elif res.returncode == 28:
+            log_debug(f"NETWORK TIMEOUT: {mask_url(url)}")
+        else:
+            log_debug(f"FETCH FAILED: curl returned {res.returncode} for {mask_url(url)}")
     except subprocess.TimeoutExpired:
-        log_debug(f"NETWORK TIMEOUT: {url}")
-        return False
+        log_debug(f"NETWORK TIMEOUT: {mask_url(url)}")
+    except Exception as e:
+        log_debug(f"FETCH EXCEPTION for {mask_url(url)}: {e}")
+    return False
 
 def check_clamav(verify=False):
     """
@@ -2395,7 +2420,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                     forensics = forensics.replace("\n", " ").replace("\r", " ")
                 
                 log_entry = f"[{timestamp}] ALERT: {reason}\n"
-                log_entry += f"  Target: {hostname} ({url})\n"
+                log_entry += f"  Target: {hostname} ({mask_url(url)})\n"
                 if forensics:
                     if isinstance(forensics, dict):
                         for k, v in forensics.items():
