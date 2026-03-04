@@ -12,9 +12,30 @@ def _ert_print(msg):
     if sys.stdout.isatty():
         print(msg, flush=True)
 
+import re
+
+def _validate_keyring_args(key, value=None):
+    """
+    STRICT VALIDATION: Prevent argument injection into secret-tool.
+    - Keys MUST be alphanumeric + underscore, max 64 chars.
+    - Values (if provided) MUST be under 16KB to prevent DoS/OOM.
+    """
+    if not key or not isinstance(key, str):
+        raise ValueError("Invalid keyring key: must be a non-empty string.")
+    
+    if not re.match(r"^[a-z0-9_]{1,64}$", key):
+        raise ValueError(f"Security Violation: Keyring key '{key}' contains forbidden characters or is too long.")
+        
+    if value is not None:
+        if not isinstance(value, str):
+            raise ValueError("Invalid keyring value: must be a string.")
+        if len(value) > 16384: # 16KB hard limit
+            raise ValueError("Security Violation: Keyring value exceeds 16KB limit.")
+
 def keyring_set(key, value):
     """Store sensitive data in System Keyring using secret-tool."""
     try:
+        _validate_keyring_args(key, value)
         cmd = ["secret-tool", "store", "--label=ClamFox Security Vault",
                "application", "clamfox", "type", "security-data", "key", key]
         subprocess.run(cmd, input=value, text=True, capture_output=True, timeout=5)
