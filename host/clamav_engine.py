@@ -108,8 +108,20 @@ _process_pool = ProcessPoolExecutor(max_workers=min(os.cpu_count() or 2, 4))
 # Runtime Integrity Watchdog State
 _MODULE_SNAPSHOTS = {}
 _CRITICAL_MODULES = ["clamav_engine.py", "tpm_provider.py", "yara_sanitizer.py", "ert_signer.py"]
-_secret_issued = False       # SECURITY: Only emit secret once per host execution
 _secret_issued_lock = threading.Lock()  # Guards atomic check-and-set of _secret_issued
+
+# Global Background Task Status
+_BACKGROUND_TASKS_STATUS = {}
+_status_lock = threading.Lock()
+
+def set_task_status(name, status, error=None):
+    """Update the status of a long-running background task."""
+    with _status_lock:
+        _BACKGROUND_TASKS_STATUS[name] = {
+            "status": status,
+            "error": error,
+            "time": time.time()
+        }
 
 def capture_runtime_snapshots():
     """Capture initial SHA-256 hashes of all critical host modules."""
@@ -1014,6 +1026,7 @@ def verify_feed_integrity(data_path, checksum_url, algo='sha256'):
 
 def update_intelligence(force=False):
     """Sync both URLhaus (Malware) and Phishing.Database (Mitchell Krog)."""
+    set_task_status("update_intelligence", "running")
     run_dir = get_run_dir()
     
     sources = [
@@ -1102,15 +1115,19 @@ def update_intelligence(force=False):
                 os.rename(tmp_path, base_path)
                 log_debug(f"{src['name']} updated successfully.")
             else:
+                log_debug(f"UPDATE FAILED: {src['name']} (Secure fetch returned False or file too small)")
+                set_task_status("update_intelligence", "error", f"Update failed for {src['name']}")
                 if os.path.exists(tmp_path): os.remove(tmp_path)
         except Exception as e:
             log_debug(f"Failed to update {src['name']}: {e}")
+            set_task_status("update_intelligence", "error", str(e))
             if os.path.exists(tmp_path): os.remove(tmp_path)
 
     # Reload caches
     load_url_cache(force=True)
     load_phish_cache(force=True)
     load_whitelist_cache(force=True)
+    set_task_status("update_intelligence", "completed")
 
 def update_url_cache(force=False):
     """Legacy wrapper for update_intelligence."""
@@ -2492,16 +2509,20 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 sanitizer = YaraSanitizer(sig_dir)
                 # Run in background to avoid blocking
                 def run_sync():
+                    set_task_status("update_yara", "running")
                     YARA_FORGE_CORE = "https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-core.zip"
                     success, msg = sanitizer.sync_from_url(YARA_FORGE_CORE, "yara_forge_filtered.yar", proxies=proxies)
                     if success:
                         log_debug(f"YARA Sync Success: {msg}")
+                        set_task_status("update_yara", "completed")
                     else:
                         log_debug(f"YARA Sync Failed: {msg}")
+                        set_task_status("update_yara", "error", msg)
 
                 threading.Thread(target=run_sync, daemon=True).start()
                 send_message({"status": "ok", "msg": _("YARA Sync Started in Background")})
             except Exception as e:
+                set_task_status("update_yara", "error", str(e))
                 send_message({"status": "error", "error": _("Bridge Error: {err}").format(err=str(e))})
         elif action == "reseal":
             config["integrity_hash"] = current_hash
@@ -2662,7 +2683,8 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                     "yara_last_update": yara_mtime,
                     "version": version_info,
                     "ert_active": config.get("ert_enabled", False),
-                    "ert_sealed": config.get("ert_sealed", False)
+                    "ert_sealed": config.get("ert_sealed", False),
+                    "task_status": _BACKGROUND_TASKS_STATUS
                 }
                 log_debug("CHECK ACTION COMPLETED")
                 send_message(status_msg)

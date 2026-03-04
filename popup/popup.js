@@ -67,11 +67,19 @@ async function forceUpdateUrlDb() {
     text.style.color = "var(--primary)";
 
     try {
-        await browser.runtime.sendMessage({ action: "proxy_update" });
-        checkEngine();
+        const response = await browser.runtime.sendMessage({ action: "proxy_update" });
+        if (response && response.status === "ok") {
+            text.textContent = browser.i18n.getMessage("synced");
+            text.style.color = "var(--success)";
+            setTimeout(() => checkEngine(), 1500);
+        } else {
+            text.textContent = response?.error || browser.i18n.getMessage("updateFailed");
+            text.style.color = "var(--danger)";
+        }
     } catch (error) {
-        text.textContent = browser.i18n.getMessage("updateFailed");
+        text.textContent = "Host Error";
         text.style.color = "var(--danger)";
+        console.error(error);
     } finally {
         btn.disabled = false;
     }
@@ -87,15 +95,16 @@ async function forceUpdateEngineDb() {
 
     try {
         const response = await browser.runtime.sendMessage({ action: "proxy_force_engine_update" });
-        if (response.status === "ok") {
+        if (response && response.status === "ok") {
             text.textContent = browser.i18n.getMessage("engineUpdated");
+            text.style.color = "var(--success)";
             setTimeout(() => checkEngine(), 1500);
         } else {
-            text.textContent = browser.i18n.getMessage("updateFailed");
+            text.textContent = response?.error || browser.i18n.getMessage("updateFailed");
             text.style.color = "var(--danger)";
         }
     } catch (error) {
-        text.textContent = browser.i18n.getMessage("hostError");
+        text.textContent = "Scanner Error";
         text.style.color = "var(--danger)";
     } finally {
         btn.disabled = false;
@@ -112,20 +121,17 @@ async function forceUpdateYaraDb() {
 
     try {
         const response = await browser.runtime.sendMessage({ action: "proxy_update_yara" });
-        if (response.status === "ok") {
-            text.textContent = "Signatures Unified";
+        if (response && response.status === "ok") {
+            text.textContent = "Syncing in Background";
             text.style.color = "var(--success)";
-            setTimeout(() => {
-                text.textContent = "Community Rules";
-                text.style.color = "";
-            }, 3000);
+            setTimeout(() => checkEngine(), 3000);
         } else {
-            text.textContent = "Sync Failed";
+            text.textContent = response?.error || "Sync Failed";
             text.style.color = "var(--danger)";
-            console.error(response.error);
+            console.error(response?.error);
         }
     } catch (error) {
-        text.textContent = "Host Error";
+        text.textContent = "Host Connection Error";
         text.style.color = "var(--danger)";
     } finally {
         btn.disabled = false;
