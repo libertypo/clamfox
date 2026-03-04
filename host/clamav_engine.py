@@ -2074,9 +2074,14 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
         return {"status": "error", "error": _("File not found or inaccessible")}
     
     # EDR SECURE SCAN: Temporarily grant read access to the host engine
-    original_mode = os.stat(actual_path).st_mode & 0o777
+    fd = None
+    original_mode = None
     try:
-        os.chmod(actual_path, 0o400) # Allow reading for scan
+        # 🛡️ DEFENSE: Use O_NOFOLLOW to prevent symlink attacks (TOCTOU)
+        # We open the file first, then perform all operations on the FD.
+        fd = os.open(actual_path, os.O_RDONLY | os.O_NOFOLLOW)
+        original_mode = os.fstat(fd).st_mode & 0o777
+        os.fchmod(fd, 0o400) # Allow reading for scan
         
         # Construction logic for the command
         # if path ends in clamdscan, it uses the daemon
@@ -2218,14 +2223,14 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
             if is_clam_infected:
                 # If already infected by heuristic/PUA, confirm
                 if "Heuristic" in virus_name or "PUA" in virus_name or "PUP" in virus_name:
-                    mb_result = check_malwarebazaar(actual_path) if not result.get("quarantined") else {"status": "quarantined_already"}
+                    mb_result = verify_hash_with_malwarebazaar(actual_path) if not result.get("quarantined") else {"status": "quarantined_already"}
                     result["mb"] = mb_result
                     if mb_result.get("status") == "mb_infected":
                         quarantine_file(actual_path)
                         result["quarantined"] = True
             else:
                 # ClamAV missed it, check MB for zero-day hash
-                mb_result = check_malwarebazaar(actual_path)
+                mb_result = verify_hash_with_malwarebazaar(actual_path)
                 result["mb"] = mb_result
                 if mb_result.get("status") == "mb_infected":
                     # MB caught it!
@@ -2239,9 +2244,14 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
         log_debug(f"CRITICAL SCAN FAILURE for {filepath}: {str(e)}")
         return {"status": "error", "error": _("System processing failure")}
     finally:
-        if 'actual_path' in locals() and actual_path and os.path.exists(actual_path):
-            try: os.chmod(actual_path, original_mode)
-            except Exception: pass
+        if fd is not None:
+            try:
+                # Restore original mode via FD to ensure we update the same file
+                if original_mode is not None:
+                    os.fchmod(fd, original_mode)
+                os.close(fd)
+            except Exception as fe:
+                log_debug(f"FD Cleanup Error for {actual_path}: {fe}")
 
 def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
     send_message({"status": "progress", "percent": 10, "msg": _("Preparing scan...")})
