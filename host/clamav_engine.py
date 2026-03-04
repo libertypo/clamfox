@@ -16,6 +16,7 @@ import tempfile
 import random
 import string
 from urllib.parse import urlparse, urljoin
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import base64
 
@@ -1275,9 +1276,13 @@ def check_high_threat_container(filepath, deep_scan=False):
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
                         futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
                         for f in futures:
-                            res = f.result()
-                            if res.get("status") == "infected":
-                                return True, _("Deep Parallel Scan: Infected file '{name}' found inside ZIP ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
+                            try:
+                                res = f.result(timeout=_GLOBAL_TIMEOUT)
+                                if res.get("status") == "infected":
+                                    return True, _("Deep Parallel Scan: Infected file '{name}' found inside ZIP ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
+                            except concurrent.futures.TimeoutError:
+                                log_debug(f"Deep Scan Timeout in ZIP member processing")
+                                continue
             return False, None
             
         elif tarfile.is_tarfile(filepath):
@@ -1309,9 +1314,13 @@ def check_high_threat_container(filepath, deep_scan=False):
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
                         futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
                         for f in futures:
-                            res = f.result()
-                            if res.get("status") == "infected":
-                                return True, _("Deep Parallel Scan: Infected file '{name}' found inside TAR ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
+                            try:
+                                res = f.result(timeout=_GLOBAL_TIMEOUT)
+                                if res.get("status") == "infected":
+                                    return True, _("Deep Parallel Scan: Infected file '{name}' found inside TAR ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
+                            except concurrent.futures.TimeoutError:
+                                log_debug(f"Deep Scan Timeout in TAR member processing")
+                                continue
             return False, None
 
     except Exception as e:
@@ -1347,9 +1356,13 @@ def check_high_threat_container(filepath, deep_scan=False):
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
                         futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
                         for f in futures:
-                            res = f.result()
-                            if res.get("status") == "infected":
-                                return True, _("Deep Parallel Scan: Infected file '{name}' found via 7z ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
+                            try:
+                                res = f.result(timeout=_GLOBAL_TIMEOUT)
+                                if res.get("status") == "infected":
+                                    return True, _("Deep Parallel Scan: Infected file '{name}' found via 7z ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
+                            except concurrent.futures.TimeoutError:
+                                log_debug(f"Deep Scan Timeout in 7z extraction processing")
+                                continue
     except Exception as e:
         log_debug(f"Container Analysis Error: {e}")
     return False, None
