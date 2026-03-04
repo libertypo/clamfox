@@ -100,8 +100,28 @@ if [ -d "$DIR/locales" ]; then
     cp -r "$DIR/locales/"* "$INSTALL_DIR/locales/"
 fi
 if [ -d "$DIR/signatures" ]; then
-    # Security: Clean up signatures in target to avoid legacy AV-blocked files
-    rm -f "$INSTALL_DIR/signatures/"*.hdb "$INSTALL_DIR/signatures/"*.ndb "$INSTALL_DIR/signatures/"*.old "$INSTALL_DIR/signatures/"*.tmp
+    # Security: Clean up stale/legacy signatures in target
+    rm -f "$INSTALL_DIR/signatures/"*.old "$INSTALL_DIR/signatures/"*.tmp
+
+    # 🛡️ Stale Maldet Check: .hdb/.ndb files are XOR-scrambled with a machine-specific
+    # key at download time. A reinstall on the same or different machine may have
+    # pre-scrambled files that no longer match the current machine key — causing
+    # clamscan to reject them as "Malformed database" and triggering a scan failure.
+    # We detect this by checking if the stored file is valid ASCII (plain ClamAV format).
+    # Binary/scrambled files are purged; the host will re-download them on first update.
+    echo "🔍 Checking for stale/scrambled maldet signature files..."
+    for stale_sig in "$INSTALL_DIR/signatures/"*.hdb "$INSTALL_DIR/signatures/"*.ndb; do
+        [ -f "$stale_sig" ] || continue
+        if ! file "$stale_sig" | grep -qiE 'ASCII|text'; then
+            echo "   ⚠️  Removing stale scrambled sig: $(basename "$stale_sig") (binary/machine-key mismatch)"
+            rm -f "$stale_sig"
+        fi
+    done
+
+    # Also remove any scrambled .hdb/.ndb from the SOURCE directory before copying
+    # (they must only be created at runtime by the host's update_intelligence function)
+    rm -f "$DIR/signatures/"*.hdb "$DIR/signatures/"*.ndb
+
     cp -r "$DIR/signatures/"* "$INSTALL_DIR/signatures/"
 fi
 
