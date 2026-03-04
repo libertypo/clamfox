@@ -12,7 +12,6 @@
         "activeTab",
         "menus",
         "contextMenus",
-        "webRequest",
         "alarms",
         "declarativeNetRequest"
     ],
