@@ -167,74 +167,7 @@ def verify_kernel_integrity():
         pass
 
 
-def try_opportunistic_sandboxing():
-    """DEACTIVATED: Sandboxing has been disabled by user request."""
-    # log_debug("🛡️  SANDBOX: Deactivated by user request.")
-    return
-    # 1. Skip if already sandboxed (sentinel env var) or in conflicting environments
-    if os.environ.get("CLAMFOX_SANDBOXED"):
-        return
-        
-    bwrap = shutil.which("bwrap")
-    if not bwrap:
-        log_debug("🛡️  SANDBOX: bubblewrap (bwrap) not found. Standard execution active.")
-        return
 
-    log_debug("🛡️  SANDBOX: bubblewrap found. Re-executing in isolated namespace...")
-    
-    host_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # DBus Proxy logic for System Keyring access
-    dbus_addr = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
-    proxy_cmd = []
-    if dbus_addr and dbus_addr.startswith("unix:path="):
-        bus_path = dbus_addr.split("=", 1)[1]
-        proxy_bin = shutil.which("xdg-dbus-proxy")
-        if proxy_bin:
-            proxy_socket = os.path.join(tempfile.gettempdir(), f"clamfox_dbus_{os.getpid()}")
-            # Start proxy to ONLY allow secret service
-            proxy_proc = subprocess.Popen([
-                proxy_bin,
-                dbus_addr,
-                proxy_socket,
-                "--talk=org.freedesktop.secrets"
-            ])
-            # Give it a moment to start
-            time.sleep(0.1)
-            proxy_cmd = ["--bind", proxy_socket, bus_path]
-
-    # Bubblewrap Arguments:
-    # --ro-bind / / : Read-only root
-    # --dev /dev, --proc /proc : Standard system binds
-    # --tmpfs /tmp : Private volatile storage
-    # --unshare-all : Namespace isolation (PID, Network, IPC, UTS)
-    # --share-net : Required for ClamAV updates & MalwareBazaar
-    # --bind [host_dir] [host_dir] : Writable access to our signatures and logs
-    cmd = [
-        bwrap,
-        "--ro-bind", "/", "/",
-        "--dev", "/dev",
-        "--proc", "/proc",
-        "--tmpfs", "/tmp",
-        "--unshare-all",
-        "--share-net",
-        "--bind", host_dir, host_dir
-    ]
-    
-    if proxy_cmd:
-        cmd.extend(proxy_cmd)
-        
-    cmd.extend([
-        "--setenv", "CLAMFOX_SANDBOXED", "1",
-        sys.executable, __file__
-    ])
-    
-    try:
-        # Re-execute and replace the current process
-        os.execv(bwrap, cmd)
-    except Exception as e:
-        log_debug(f"🚨 SANDBOX ERROR: Failed to launch bubblewrap: {e}")
-        # Fail-open: continue without sandbox if execv fails
 
 # Security: Resolve external tool paths at startup to prevent
 # PATH hijacking attacks. Use absolute paths for production reliability.
@@ -2822,7 +2755,6 @@ def cleanup_stale_quarantine():
 
 def main():
     # 0. Opportunistic Sandboxing (Security Layer 0)
-    try_opportunistic_sandboxing()
     
     log_debug("Host script started (Persistent Mode)")
     

@@ -294,7 +294,7 @@ echo "✅ Native protection active (MAC bypassed for stability)."
 # 10. Final Summary
 echo "=================================================="
 echo "✅ ClamFox Host installed in /opt/clamfox"
-echo "✅ Registered for all Firefox variants (Deb, Snap, Flatpak)"
+echo "✅ Registered for Firefox (Native Host)"
 echo "✅ Extension sideloaded (Removable by user)"
 echo "✅ Privacy Shield & Anti-Tamper Ready"
 echo "--------------------------------------------------"
