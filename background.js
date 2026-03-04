@@ -77,7 +77,7 @@ async function initWasm() {
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-        const EXPECTED_WASM_HASH = "2b6babb47828432d460efa5314c164afa6f742366c8a1fc53df4b195b39f5f67";
+        const EXPECTED_WASM_HASH = "PLACEHOLDER_WASM_HASH";
         if (hashHex !== EXPECTED_WASM_HASH) {
             console.error("🛑 SECURITY ALERT: WASM Core tampered or corrupt! SRI verification failed.");
             browser.action.setBadgeText({ text: "WSRI" });

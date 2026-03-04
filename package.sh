@@ -21,6 +21,16 @@ echo "🛡️  Injecting Supply-Chain Canary: $BUILD_CANARY"
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_full/background.js
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_full/host/clamav_engine.py
 
+# WASM Integrity Injection
+WASM_FILE="wasm_shield/clamfox_shield.wasm"
+if [ -f "$WASM_FILE" ]; then
+    WASM_HASH=$(sha256sum "$WASM_FILE" | cut -d' ' -f1)
+    echo "🛡️  Injecting WASM Integrity Hash: $WASM_HASH"
+    sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_full/background.js
+else
+    echo "⚠️  WASM binary not found. Integrity check will stay as placeholder."
+fi
+
 # Privacy: Remove local state/secrets from host before packaging
 rm -f build_full/host/config.json
 rm -f build_full/host/host_debug.log build_full/host/alert_log.txt build_full/host/tpm_debug.err
@@ -36,7 +46,12 @@ mkdir -p build_xpi_standalone
 cp -r background.js content.js content.css design_tokens.css popup icons _locales data wasm_shield build_xpi_standalone/
 cp manifest_amo.json build_xpi_standalone/manifest.json
 mkdir -p build_xpi_standalone/META-INF
-cd build_xpi_standalone && sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" background.js && zip -r "../$XPI_STANDALONE" ./* && cd ..
+cd build_xpi_standalone && sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" background.js
+# WASM Integrity Injection for Standalone
+if [ -f "../$WASM_FILE" ]; then
+    sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" background.js
+fi
+zip -r "../$XPI_STANDALONE" ./* && cd ..
 
 # 3. Create Full XPI (Includes Native Host)
 mkdir -p build_xpi_full
@@ -50,6 +65,9 @@ rm -f build_xpi_full/host/decode_log.py
 rm -rf build_xpi_full/host/__pycache__
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_xpi_full/background.js
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_xpi_full/host/clamav_engine.py
+if [ -f "$WASM_FILE" ]; then
+    sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_xpi_full/background.js
+fi
 mkdir -p build_xpi_full/META-INF
 cd build_xpi_full && zip -r "../$XPI_FULL" ./* && cd ..
 
@@ -64,6 +82,9 @@ rm -f build_amo/host/decode_log.py
 rm -rf build_amo/host/__pycache__
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_amo/background.js
 sed -i "s/PLACEHOLDER_CANARY/$BUILD_CANARY/g" build_amo/host/clamav_engine.py
+if [ -f "$WASM_FILE" ]; then
+    sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_amo/background.js
+fi
 cd build_amo && zip -r "../$AMO_SOURCE" ./* && cd ..
 
 # Cleanup
