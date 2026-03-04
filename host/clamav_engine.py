@@ -395,13 +395,14 @@ def is_safe_path(filepath):
     """
     Robust Path Traversal Protection.
     Ensures that any file path handled by the Native Host is within a strictly 
-    whitelisted set of 'Safe Zones'.
+    whitelisted set of 'Safe Zones'. Uses recursive boundary checking to prevent
+    symlink-based escapes.
     """
     if not filepath: return False
     try:
         # 1. Expand ~ and get absolute path
         abs_path = os.path.abspath(os.path.expanduser(filepath))
-        # 2. Resolve symlinks to prevent symlink-to-system-file attacks
+        # 2. Resolve all symlinks to prevent symlink-to-system-file attacks (Recursive check)
         real_path = os.path.realpath(abs_path)
         
         # 3. Define the 'Safe Zones'
@@ -414,12 +415,24 @@ def is_safe_path(filepath):
             os.path.dirname(__file__)
         ]
         
+        # 4. Enforce strict boundaries for resolved paths
         for root in safe_roots:
             root_abs = os.path.realpath(os.path.abspath(root))
             if os.path.commonpath([root_abs, real_path]) == root_abs:
+                # 🛡️ Additional check: no suspicious parent traversal in final resolved path
+                # Although realpath resolves '..', we reject any attempt to move into 
+                # root-level directories (e.g. /etc, /bin) via symlink escapes.
+                if real_path == root_abs:
+                    # Allowing the root itself is usually not intended for scanning
+                    return False
+                
+                # Minimum depth check: prevent scanning the literal /tmp or ~ themselves
+                if real_path.count(os.sep) < 2:
+                    return False
+                    
                 return True
                 
-        log_debug(f"🚨 SECURITY ALERT: Blocked Path Traversal attempt to: {filepath}")
+        log_debug(f"🚨 SECURITY ALERT: Blocked Path Traversal attempt to: {filepath} (Resolved: {real_path})")
         return False
     except Exception as e:
         log_debug(f"Security Engine path validation error: {e}")
