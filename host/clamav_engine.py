@@ -75,6 +75,9 @@ _MAX_CONTAINER_FILES = 500      # Max files in an archive to prevent ZIP bombs
 _MAX_CONTAINER_UNCOMPRESSED_SIZE = 100 * 1024 * 1024 # 100 MB max uncompressed size for archives
 _QUARANTINE_DIR = os.path.expanduser("~/.clamfox_quarantine")
 
+# Global Persistent State
+SENSITIVE_CONFIG_KEYS = ["secret", "integrity_hash", "honeypot_secret"]
+
 _config_lock = threading.Lock()
 _output_lock = threading.Lock()
 
@@ -770,13 +773,12 @@ def load_config():
 
 def save_config(config):
     """Save sensitive items to Keyring and public items to JSON (Thread-safe)."""
-    sensitive_keys = ["secret", "integrity_hash", "honeypot_secret"]
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     
     with _config_lock:
         # 1. Update Keyring
         try:
-            for key in sensitive_keys:
+            for key in SENSITIVE_CONFIG_KEYS:
                 if key in config:
                     keyring_set(key, str(config[key]))
         except Exception as e:
@@ -784,7 +786,7 @@ def save_config(config):
                 
         # 2. Update File (stripped of sensitive data)
         try:
-            public_config = {k: v for k, v in config.items() if k not in sensitive_keys}
+            public_config = {k: v for k, v in config.items() if k not in SENSITIVE_CONFIG_KEYS}
             with open(config_path, "w") as f:
                 json.dump(public_config, f, indent=4)
         except PermissionError:
@@ -2449,8 +2451,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 keyring_set("integrity_hash", current_hash)
                 
                 # 2. Extract public config and write via pkexec
-                sensitive_keys = ["secret", "integrity_hash"]
-                public_config = {k: v for k, v in config.items() if k not in sensitive_keys}
+                public_config = {k: v for k, v in config.items() if k not in SENSITIVE_CONFIG_KEYS}
                 
                 json_str = json.dumps(public_config, indent=4)
                 # Secure Writing: Use tee via pkexec to avoid shell injection and handling piping safely

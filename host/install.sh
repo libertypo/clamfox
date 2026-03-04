@@ -142,11 +142,16 @@ CLAM_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$CLAM_PATH','
 
 if [ -f "$DIR/config.json" ]; then
     cp "$DIR/config.json" "$INSTALL_DIR/"
-    python3 -c "import json; c=json.load(open('$INSTALL_DIR/config.json')); c['integrity_hash']='$SCRIPT_HASH'; c['binary_hash']='$CLAM_HASH'; json.dump(c, open('$INSTALL_DIR/config.json','w'), indent=4)"
+    # Filter sensitive keys during migration
+    python3 -c "import json; c=json.load(open('$INSTALL_DIR/config.json')); c={k:v for k,v in c.items() if k not in ['secret', 'integrity_hash', 'honeypot_secret']}; c['integrity_hash']='$SCRIPT_HASH'; c['binary_hash']='$CLAM_HASH'; json.dump(c, open('$INSTALL_DIR/config.json','w'), indent=4)"
 else
-    SECRET=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-    echo "{\"secret\": \"$SECRET\", \"anti_tamper\": true, \"last_rotation\": $(date +%s), \"integrity_hash\": \"$SCRIPT_HASH\", \"binary_hash\": \"$CLAM_HASH\"}" > "$INSTALL_DIR/config.json"
+    # Create empty public config; engine will generate and keyring-store secrets on first run
+    echo "{\"anti_tamper\": true, \"last_rotation\": $(date +%s), \"integrity_hash\": \"$SCRIPT_HASH\", \"binary_hash\": \"$CLAM_HASH\"}" > "$INSTALL_DIR/config.json"
 fi
+
+# Hardening: Ensure config.json is never world-readable
+chown "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/config.json"
+chmod 600 "$INSTALL_DIR/config.json"
 
 # 4.5 Ephemeral Root Trust (ERT) Activation
 if command -v tpm2_getcap &> /dev/null; then
