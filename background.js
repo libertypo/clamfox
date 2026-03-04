@@ -34,6 +34,12 @@ let WASM_READY = false;
 let wasmInstance = null;
 let wasmExports = null;
 
+/**
+ * Load persistent user-configured whitelist from storage.
+ * 
+ * Restores previously whitelisted domains from browser.storage.local.
+ * Called during startup to initialize USER_WHITELIST Set.
+ */
 async function initWhitelist() {
     const storage = await browser.storage.local.get("userWhitelist");
     if (storage.userWhitelist && Array.isArray(storage.userWhitelist)) {
@@ -50,6 +56,16 @@ function isPortal(hostname) {
     return SECURE_PORTALS.some(d => base === d);
 }
 
+/**
+ * Check if a domain is whitelisted (trusted).
+ * 
+ * A domain is considered whitelisted if it:
+ * 1. Matches a Secure Portal (High-Value Target)
+ * 2. Is in the persistent user whitelist
+ * 
+ * @param {string} hostname - Domain name to check (e.g., 'mail.google.com')
+ * @returns {boolean} - True if domain is trusted, false otherwise
+ */
 function isWhitelisted(hostname) {
     if (!hostname) return false;
     // 1. Check Hardcoded/Dynamic High-Value Targets (Secure Portals)
@@ -119,9 +135,21 @@ async function initBackground() {
         HONEYPOT_SECRET = storage.honeypotSecret;
     }
 
-    // Perform initial handshake to sync secrets from host
-    await getSecret(true);
-    dbg("🛡️ SECURITY CORE: Startup handshake complete.");
+    // Perform initial handshake to sync secrets from host with error handling
+    try {
+        const secret = await getSecret(true);
+        if (!secret) {
+            throw new Error("Failed to obtain session secret from host");
+        }
+        dbg("🛡️ SECURITY CORE: Startup handshake complete.");
+    } catch (e) {
+        console.error("🛑 CRITICAL: Unable to initialize secure session secret:", e);
+        // Mark extension as degraded
+        browser.action.setBadgeText({ text: "ERR" });
+        browser.action.setBadgeBackgroundColor({ color: "#ef4444" });
+        // Log but don't crash - allow degraded mode
+        dbg("⚠️ Extension running in degraded mode without native host");
+    }
 }
 
 initBackground();
@@ -336,6 +364,58 @@ browser.downloads.onChanged.addListener(async (delta) => {
     }
 });
 
+/**
+ * Rate limiter for scan operations to prevent DoS via rapid repeated scans.
+ * Maintains per-file cooldown to avoid redundant scanning of same target.
+ */
+class ScanRateLimiter {
+    constructor(cooldownMs = 30000) {
+        this.scanTimes = new Map(); // filename -> last scan timestamp
+        this.SCAN_COOLDOWN = cooldownMs;
+    }
+    
+    /**
+     * Check if a target can be scanned now.
+     * @param {string} target - File path, URL, or identifier
+     * @returns {boolean} - True if scanning allowed, false if in cooldown
+     */
+    canScan(target) {
+        const lastScan = this.scanTimes.get(target);
+        const now = Date.now();
+        
+        if (lastScan && (now - lastScan) < this.SCAN_COOLDOWN) {
+            dbg(`🛡️ SCAN RATE LIMIT: Skipping ${target} (cooldown active)`);
+            return false;
+        }
+        
+        this.scanTimes.set(target, now);
+        return true;
+    }
+    
+    /**
+     * Clear cooldown for a specific target (e.g., for manual scans).
+     * @param {string} target - Target to reset
+     */
+    reset(target) {
+        this.scanTimes.delete(target);
+    }
+}
+
+const fileScanLimiter = new ScanRateLimiter(30000); // 30 second cooldown between same-file scans
+
+/**
+ * Sends a message to the native host with automatic timeout enforcement.
+ * 
+ * Enforces both timeout and response validation in a single operation.
+ * All outbound native messages flow through this function to ensure critical
+ * checks (response schema, integrity) are never bypassed.
+ * 
+ * @param {string} hostname - Native host name (e.g., 'clamav_host')
+ * @param {Object} message - Message object with 'action' and other properties
+ * @param {number} timeoutMs - Timeout in milliseconds (default 8000)
+ * @returns {Promise<Object>} Validated response from native host
+ * @throws {Error} If timeout occurs or response validation fails
+ */
 async function sendNativeMessageWithTimeout(hostname, message, timeoutMs = 8000) {
     const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Native Messaging request timed out")), timeoutMs)
@@ -359,6 +439,21 @@ async function sendNativeMessageWithTimeout(hostname, message, timeoutMs = 8000)
 /**
  * Validates incoming host messages against expected schemas to prevent 
  * exploitation of the extension logic via malformed responses.
+ * 
+ * Performs strict type checking and constraint validation on all fields
+ * to prevent injection attacks or resource exhaustion via oversized responses.
+ * 
+ * @param {string} action - Original action that triggered this response
+ * @param {Object} response - Response object from native host
+ * @throws {Error} If response fails any validation checks
+ * 
+ * @example
+ * // Throws: "Type mismatch for 'status': expected string, got number"
+ * validateNativeResponse('scan', { status: 123 });
+ * 
+ * @example
+ * // Throws: "String field 'error' exceeds maximum permitted length (2KB)"
+ * validateNativeResponse('check', { error: 'x'.repeat(3000) });
  */
 function validateNativeResponse(action, response) {
     if (!response || typeof response !== "object" || Array.isArray(response)) {
@@ -916,6 +1011,12 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
 }
 
 async function performScan(target, type, downloadId = null, tabId = null) {
+    // Security: Rate limit scans of same file to prevent DoS
+    if (!fileScanLimiter.canScan(target)) {
+        dbg(`Scan rate-limited for: ${target}`);
+        return;
+    }
+    
     dbg(`Initiating ${type} scan for: ${target}`);
 
     const progressUpdate = (data) => {

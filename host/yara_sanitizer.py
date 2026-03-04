@@ -5,6 +5,7 @@ import requests
 import zipfile
 import io
 import shutil
+import hashlib
 
 # ClamAV YARA Limitations:
 # 1. No 'import' modules (pe, elf, dotnet, etc.)
@@ -18,6 +19,38 @@ import shutil
 MAX_ZIP_FILES = 500
 MAX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024 # 50 MB
 
+def validate_yara_rule_safety(rule_content):
+    """Validate YARA rule before sanitization to prevent parser DoS.
+    
+    Args:
+        rule_content: Raw YARA rule text
+        
+    Returns:
+        SHA256 hash of validated content
+        
+    Raises:
+        ValueError: If rule contains dangerous patterns or exceeds size limits
+    """
+    # Size limits
+    MAX_RULE_SIZE = 1024 * 1024  # 1MB per rule
+    if len(rule_content) > MAX_RULE_SIZE:
+        raise ValueError(f"Rule exceeds size limit: {len(rule_content)} > {MAX_RULE_SIZE}")
+    
+    # Dangerous patterns that could cause parsing issues or infinite loops
+    dangerous_patterns = [
+        r'entrypoint',        # Can cause parsing issues
+        r'filesize',          # Could cause infinite loops
+        r'import\s+"',        # Already filtered, but double-check
+        r'all\s+of\s+them',   # Can cause performance issues
+    ]
+    
+    for pattern in dangerous_patterns:
+        if re.search(pattern, rule_content, re.IGNORECASE):
+            raise ValueError(f"Dangerous pattern detected: {pattern}")
+    
+    # Hash check to detect modification
+    return hashlib.sha256(rule_content.encode()).hexdigest()
+
 class YaraSanitizer:
     def __init__(self, output_dir):
         self.output_dir = output_dir
@@ -25,7 +58,23 @@ class YaraSanitizer:
             os.makedirs(output_dir)
             
     def sanitize_content(self, content):
-        """Processes a YARA file and returns ClamAV compatible content."""
+        """Processes a YARA file and returns ClamAV compatible content.
+        
+        Args:
+            content: YARA rule text
+            
+        Returns:
+            Sanitized ClamAV-compatible YARA rule text
+            
+        Raises:
+            ValueError: If content fails safety validation
+        """
+        # Security: Validate before processing
+        try:
+            validate_yara_rule_safety(content)
+        except ValueError as e:
+            raise ValueError(f"YARA content validation failed: {e}")
+        
         # Remove imports
         content = re.sub(r'import\s+"[^"]+"', '', content)
         

@@ -22,6 +22,7 @@ host/verify_digest
 host/verify_pub
 host/trust_db.json
 host/vault_pub.pem
+host/quarantine/
 
 # Build Artifacts / Distribution Packages
 *.xpi
@@ -46,13 +47,12 @@ test_script.js
 test_update.py
 /tmp/test_sandboxing.py
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
+# Security test suites and integration helpers (generated/maintained locally, not pushed)
+test_security_suite.js
+test_security_suite.py
+integration_tests.py
+cve_catalog.json
 
-# Editor artifacts
-.DS_Store
 *.swp
 
 # Release signing key — stored in OS keyring (NEVER commit to repo):

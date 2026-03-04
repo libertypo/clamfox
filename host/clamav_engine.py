@@ -105,6 +105,18 @@ _thread_pool = ThreadPoolExecutor(max_workers=6)
 # low-end hardware and avoid spawning more processes than logical cores.
 _process_pool = ProcessPoolExecutor(max_workers=min(os.cpu_count() or 2, 4))
 
+def _cleanup_pools():
+    """Safely shutdown thread and process pools on exit."""
+    try:
+        _thread_pool.shutdown(wait=True, cancel_futures=True)
+        _process_pool.shutdown(wait=True, cancel_futures=True)
+        log_debug("Process and thread pools shut down cleanly")
+    except Exception as e:
+        log_debug(f"Error shutting down pools: {e}")
+
+import atexit
+atexit.register(_cleanup_pools)
+
 # Runtime Integrity Watchdog State
 _MODULE_SNAPSHOTS = {}
 _CRITICAL_MODULES = ["clamav_engine.py", "tpm_provider.py", "yara_sanitizer.py", "ert_signer.py"]
@@ -177,6 +189,27 @@ def verify_kernel_integrity():
             pass
     except Exception:
         pass
+
+def validate_message_timestamp(timestamp, max_drift_seconds=60):
+    """Validate message timestamp to prevent replay attacks.
+    
+    Args:
+        timestamp: Unix timestamp from incoming message
+        max_drift_seconds: Maximum acceptable time difference (default 60s)
+        
+    Returns:
+        True if timestamp is valid
+        
+    Raises:
+        ValueError: If timestamp is outside acceptable range
+    """
+    current_time = time.time()
+    drift = abs(current_time - timestamp)
+    
+    if drift > max_drift_seconds:
+        raise ValueError(f"Message timestamp invalid (drift: {drift:.1f}s > {max_drift_seconds}s)")
+    
+    return True
 
 
 
