@@ -1251,6 +1251,11 @@ def get_mime_type(filepath):
     """Detect the real MIME type of a file using 'file' command."""
     if not _BIN_FILE:
         return None
+    
+    if not is_safe_path(filepath) or not os.path.exists(filepath):
+        log_debug(f"SECURITY ALERT: get_mime_type rejected unsafe or missing path: {filepath}")
+        return None
+        
     try:
         process = subprocess.run([_BIN_FILE, '-b', '--mime-type', '--', filepath], capture_output=True, text=True)
         if process.returncode == 0:
@@ -1949,6 +1954,10 @@ def check_similarity_to_golden(url):
 def start_clipper_shield():
     """Background monitoring for automated crypto-address hijacking."""
     def monitor():
+        if os.environ.get("CLAMFOX_ALLOW_CLIPBOARD") != "1":
+            log_debug("Clipboard shield disabled. Set CLAMFOX_ALLOW_CLIPBOARD=1 to enable.")
+            return
+
         # Bitcoin and Ethereum detection patterns
         PATTERNS = [
             r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$',

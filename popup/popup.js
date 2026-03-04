@@ -870,11 +870,46 @@ async function showAuditLogs() {
     }
 }
 
+function parseForensicsData(jsonString) {
+    try {
+        const schema = {
+            timestamp: 'number',
+            url: 'string',
+            userAgent: 'string',
+            offendingNode: 'string',
+            parentContext: 'string',
+            domain: 'string',
+            ip: 'string',
+            threat: 'string'
+        };
+
+        const data = JSON.parse(jsonString || "{}");
+        const safeData = {};
+
+        // Validate each field
+        for (const [key, value] of Object.entries(data)) {
+            if (schema[key] && typeof value === schema[key]) {
+                // Enforce size limits
+                if (typeof value === 'string' && value.length > 5000) {
+                    safeData[key] = value.substring(0, 5000) + "... (truncated)";
+                } else {
+                    safeData[key] = value;
+                }
+            }
+        }
+
+        return safeData;
+    } catch (e) {
+        console.error('🛡️ Forensics validation failed:', e);
+        return {};
+    }
+}
+
 async function communityBurn() {
     const btn = document.getElementById('report-threat-btn');
     const url = btn.dataset.url;
     const reason = btn.dataset.reason;
-    const forensics = JSON.parse(btn.dataset.forensics || "{}");
+    const forensics = parseForensicsData(btn.dataset.forensics || "{}");
 
     if (!url) return;
 

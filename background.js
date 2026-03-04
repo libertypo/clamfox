@@ -1179,7 +1179,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     return res;
                 } catch (err) {
                     console.error("Diagnostic: proxy_check CRITICAL FAILURE:", err);
-                    return { status: "error", error: err.message };
+                    return { status: "error", error: "An internal security assessment error occurred." };
                 }
             }
         } else if (message.action === "proxy_update") {
@@ -1376,7 +1376,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Return true to indicate we will send a response asynchronously
     handleMessage().then(sendResponse).catch(err => {
         console.error("Message Handler Error:", err);
-        sendResponse({ status: "error", error: err.message });
+        sendResponse({ status: "error", error: "An internal extension messaging error occurred." });
     });
     return true;
 });

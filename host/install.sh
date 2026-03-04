@@ -31,7 +31,6 @@ pkg_map=(
     ["curl"]="curl" 
     ["file"]="file" 
     ["7z"]="p7zip-full" 
-    ["xclip"]="xclip" 
     ["gettext"]="gettext" 
     ["tpm2_getcap"]="tpm2-tools"
     ["python3"]="python3-requests" # Ensure requests for YARA sync
