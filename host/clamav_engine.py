@@ -1024,6 +1024,39 @@ def check_malwarebazaar(filepath):
     except Exception as e:
         return {"status": "mb_error", "error": str(e)}
 
+def verify_feed_integrity(data_path, checksum_url, algo='sha256'):
+    """
+    Fetch an out-of-band checksum and verify the downloaded file.
+    Supports MD5 and SHA-256.
+    """
+    if not checksum_url:
+        return True
+    
+    tmp_sum = data_path + ".sum"
+    try:
+        # Use secure_fetch to get the checksum file
+        if secure_fetch(checksum_url, tmp_sum, use_tunnel=True):
+            with open(tmp_sum, "r") as f:
+                expected_data = f.read().strip().split()[0] # Handle "hash file" format
+            
+            h = hashlib.md5() if algo == 'md5' else hashlib.sha256()
+            with open(data_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    h.update(chunk)
+            actual_hash = h.hexdigest()
+            
+            if actual_hash.lower() == expected_data.lower():
+                log_debug(f"Integrity Verified: {os.path.basename(data_path)} matches {algo} sum")
+                return True
+            else:
+                log_debug(f"INTEGRITY FAIL: {os.path.basename(data_path)} hash mismatch!")
+                return False
+    except Exception as e:
+        log_debug(f"Integrity check error for {checksum_url}: {e}")
+    finally:
+        if os.path.exists(tmp_sum): os.remove(tmp_sum)
+    return False
+
 def update_intelligence(force=False):
     """Sync both URLhaus (Malware) and Phishing.Database (Mitchell Krog)."""
     run_dir = get_run_dir()
@@ -1032,27 +1065,37 @@ def update_intelligence(force=False):
         {
             "name": "URLhaus (Malware)",
             "url": "https://urlhaus.abuse.ch/downloads/text/",
-            "path": os.path.join(run_dir, "urldb.txt")
+            "path": os.path.join(run_dir, "urldb.txt"),
+            "checksum_url": None,
+            "checksum_algo": "sha256"
         },
         {
             "name": "Phishing.Database (Krog)",
             "url": "https://raw.githubusercontent.com/mitchellkrogza/Phishing.Database/master/phishing-domains-ACTIVE.txt",
-            "path": os.path.join(run_dir, "phishdb.txt")
+            "path": os.path.join(run_dir, "phishdb.txt"),
+            "checksum_url": "https://raw.githubusercontent.com/Phishing-Database/checksums/master/phishing-domains-ACTIVE.txt.sha256",
+            "checksum_algo": "sha256"
         },
         {
             "name": "Global Whitelist (Tranco/Researchers)",
             "url": "https://tranco-list.eu/download/KVP9J/1000000",
-            "path": os.path.join(run_dir, "whitelistdb.txt")
+            "path": os.path.join(run_dir, "whitelistdb.txt"),
+            "checksum_url": None,
+            "checksum_algo": "sha256"
         },
         {
             "name": "Maldet (LMD) MD5 Hashes",
             "url": "https://www.rfxn.com/downloads/rfxn.hdb",
-            "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.hdb")
+            "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.hdb"),
+            "checksum_url": "https://www.rfxn.com/downloads/rfxn.hdb.md5",
+            "checksum_algo": "md5"
         },
         {
             "name": "Maldet (LMD) Hex Patterns",
             "url": "https://www.rfxn.com/downloads/rfxn.ndb",
-            "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.ndb")
+            "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.ndb"),
+            "checksum_url": "https://www.rfxn.com/downloads/rfxn.ndb.md5",
+            "checksum_algo": "md5"
         }
     ]
     
@@ -1075,6 +1118,13 @@ def update_intelligence(force=False):
             success = secure_fetch(src["url"], tmp_path, use_tunnel=True)
             
             if success and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000:
+                # 🛡️ INTEGRITY: Verify out-of-band signature/hash if available
+                if not verify_feed_integrity(tmp_path, src["checksum_url"], src["checksum_algo"]):
+                     if src["checksum_url"]:
+                         log_debug(f"🚨 INTEGRITY ERROR: {src['name']} failed verification. Aborting update.")
+                         if os.path.exists(tmp_path): os.remove(tmp_path)
+                         continue
+                
                 # 🛡️ Signature Obfuscation: Scramble .hdb and .ndb to prevent host-AV interference
                 if base_path.endswith(('.hdb', '.ndb')):
                     try:
