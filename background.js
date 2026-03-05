@@ -367,7 +367,20 @@ browser.downloads.onCreated.addListener(async (item) => {
             await browser.downloads.cancel(item.id).catch(() => { });
             await browser.downloads.erase({ id: item.id }).catch(() => { });
 
-            logBlock(new URL(item.url).hostname, "Malicious Link (Download Pre-Scan)", item.url);
+            const blockedHost = new URL(item.url).hostname;
+            logBlock(
+                blockedHost,
+                "Malicious Link (Download Pre-Scan)",
+                item.url,
+                null,
+                {
+                    block_stage: "source",
+                    source_host: blockedHost,
+                    final_host: blockedHost,
+                    engine_verdict: response.threat || "URL reputation malicious verdict",
+                    verdict_status: response.status || "malicious"
+                }
+            );
 
             browser.notifications.create({
                 type: "basic",
@@ -1079,12 +1092,21 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
         maskedUrl = parsedUrl.href;
     } catch (e) { /* non-HTTP url — keep raw value */ }
 
+    const inferredBlockStage = reason.includes("Download Pre-Scan") ? "source" : "content";
+    const sourceHost = (forensicData && typeof forensicData.source_host === "string") ? forensicData.source_host : incidentHostname;
+    const finalHost = (forensicData && typeof forensicData.final_host === "string") ? forensicData.final_host : incidentHostname;
+    const engineVerdict = (forensicData && typeof forensicData.engine_verdict === "string") ? forensicData.engine_verdict : reason;
+
     const incident = {
         name: name,
         status: "blocked",
         reason: reason,
         url: maskedUrl,
         hostname: incidentHostname,
+        block_stage: (forensicData && typeof forensicData.block_stage === "string") ? forensicData.block_stage : inferredBlockStage,
+        source_host: sourceHost,
+        final_host: finalHost,
+        engine_verdict: engineVerdict,
         time: new Date().toISOString(),
         tabId: tabId,
         reported: false,
@@ -1239,7 +1261,19 @@ async function performScan(target, type, downloadId = null, tabId = null) {
                     browser.notifications.clear(`scan-${downloadId}`).catch(() => { });
                 }
                 const virus = response.virus || (response.mb && response.mb.status === "mb_infected" ? "MalwareBazaar Flag" : "Unknown Threat");
-                await logBlock(target.split('/').pop() || target, virus, target, tabId);
+                await logBlock(
+                    target.split('/').pop() || target,
+                    virus,
+                    target,
+                    tabId,
+                    {
+                        block_stage: "content",
+                        source_host: null,
+                        final_host: null,
+                        engine_verdict: response.virus || (response.mb && response.mb.status === "mb_infected" ? "MalwareBazaar Flag" : "File scan malicious verdict"),
+                        verdict_status: response.status || "infected"
+                    }
+                );
 
                 browser.action.setBadgeText({ text: "ERR" });
                 browser.action.setBadgeBackgroundColor({ color: "#ef4444" });

@@ -719,8 +719,45 @@ async function renderBlockHistory() {
             }
             meta.textContent = metaText;
 
+            const stage = document.createElement('div');
+            stage.className = 'log-meta';
+            const stageLabel = (block.block_stage === 'source') ? 'Blocked source' : ((block.block_stage === 'content') ? 'Blocked file content' : 'Blocked');
+            stage.textContent = stageLabel;
+
+            const hosts = document.createElement('div');
+            hosts.className = 'log-meta';
+            const src = block.source_host || '-';
+            const fin = block.final_host || '-';
+            hosts.textContent = `Source: ${src} | Final: ${fin}`;
+
+            const verdict = document.createElement('div');
+            verdict.className = 'log-meta';
+            verdict.textContent = `Engine verdict: ${block.engine_verdict || block.reason || 'Unknown'}`;
+
+            const details = document.createElement('details');
+            details.className = 'block-technical';
+            const summary = document.createElement('summary');
+            summary.textContent = 'Show technical details';
+            const detailBody = document.createElement('pre');
+            detailBody.textContent = JSON.stringify({
+                reason: block.reason,
+                status: block.status,
+                block_stage: block.block_stage || null,
+                source_host: block.source_host || null,
+                final_host: block.final_host || null,
+                engine_verdict: block.engine_verdict || null,
+                url: block.url || null,
+                time: block.time || null
+            }, null, 2);
+            details.appendChild(summary);
+            details.appendChild(detailBody);
+
             info.appendChild(name);
             info.appendChild(meta);
+            info.appendChild(stage);
+            info.appendChild(hosts);
+            info.appendChild(verdict);
+            info.appendChild(details);
             item.appendChild(info);
 
             // Click to view forensics
