@@ -1,69 +1,65 @@
-# Changelog
+Changelog
 
 All notable changes to ClamFox are documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+Format follows Keep a Changelog.
+Reference: https://keepachangelog.com/en/1.0.0/
 
----
+Version 0.0.6.5
+Date: 2026-03-04
 
-## [0.0.6.5] — 2026-03-04
+Added
+YARA rule auto-sync integrated into installer. Signatures are fetched and sanitized on each install.sh run.
+yara_sanitizer.py hardened for LibClamAV compatibility by removing unsupported xor and base64 modifiers, empty string patterns, and incompatible constructs.
+Installer detects and removes stale XOR-scrambled maldet signature files during reinstall to prevent malformed database errors.
 
-### Added
-- YARA rule auto-sync integrated into the installer: YARA signatures are now fetched and sanitized on every `install.sh` run.
-- `yara_sanitizer.py` hardened for full LibClamAV compatibility: strips unsupported `xor`/`base64` modifiers, empty string patterns, and other incompatible constructs.
-- Installer now detects and removes stale XOR-scrambled maldet signature files on reinstall (prevents "Malformed database" clamscan errors after machine migration).
+Fixed
+Removed lingering debug console.log statements from extension JavaScript.
+Security audit Phase 9 finding S-1 resolved by removing remaining bare except clauses in native host.
 
-### Fixed
-- Removed lingering debug `console.log` statements from extension JS.
-- Phase 9 security audit finding S-1: cleared all remaining bare `except` clauses in the native host.
+Version 0.0.6.3
+Date: 2026-03-03
 
----
+Security audit, 9-phase set
+Phase 8 fixed hydration directory chmod issue R-1 and bare except issue R-2.
+Phase 7 fixed findings Q-1 through Q-3, including subprocess hardening and path validation.
+Phase 6 fixed findings P-1 through P-4, including input sanitization and error handling.
+Phase 5 minimized payload data O-1 and suppressed debug output in yara_sanitizer O-2.
+Phase 4 fixed findings N-1 through N-4, including binary path reliability and reference sanitization.
+Phase 3 fixed findings C-1 through L-5 across native host and extension.
+Phase 1 and Phase 2 delivered binary path reliability and general compliance hardening.
 
-## [0.0.6.3] — 2026-03-03
+Added
+GPLv3 license and updated README documentation.
+Public Suffix List domain matching for more accurate phishing detection.
+Maldet signature database integration for enhanced Linux malware detection.
+Unified quarantine directory with stale lock recovery.
+Subprocess timeouts for freshclam and ert_signer.
 
-### Security (9-phase audit)
-- **Phase 8**: Fixed hydration directory `chmod` (R-1) and bare `except` clauses (R-2).
-- **Phase 7**: Fixed findings Q-1 through Q-3 (subprocess hardening, path validation).
-- **Phase 6**: Fixed findings P-1 through P-4 (input sanitisation, error handling).
-- **Phase 5**: Minimised payload data (O-1) and suppressed debug output in `yara_sanitizer` (O-2).
-- **Phase 4**: Fixed findings N-1 through N-4 (binary path reliability, reference sanitisation).
-- **Phase 3**: Fixed findings C-1 through L-5 (broad hardening across native host and extension).
-- **Phase 1–2**: Binary path reliability and general compliance hardening.
+Version 0.0.6.0
+Date: 2026-03-01
 
-### Added
-- GPLv3 license and updated README documentation.
-- Public Suffix List (PSL) domain matching for more accurate phishing detection.
-- Maldet (LMD) signature databases integrated for enhanced Linux malware detection.
-- Unified quarantine directory (`~/.clamfox_quarantine`) with stale lock recovery.
-- Subprocess timeouts for `freshclam` and `ert_signer`.
+Added
+EC-DSA log shield with authenticated log encryption and machine-bound P-256 keys in system keyring.
+FS-Verity kernel integrity support for read-only lock on signature and block databases.
+Opportunistic bubblewrap sandboxing for native host when available.
+High-speed WASM security shield for homograph and DGA detection.
+Anti-freeze protection with time-lock signed headers on threat databases to prevent replay and freeze attacks.
+Zero-knowledge domain whitelist with salted hashes instead of plaintext domains.
+Session key rotation every six hours with honeypot decoys.
+On-access scanning status detection for clamonacc and clamav-daemon.
 
----
+Changed
+Removed unused scripting and cookies browser permissions.
+Hardened clickjacking shield with numeric and alpha analysis plus broader interactive element detection.
 
-## [0.0.6.0] — 2026-03-01
+Version 0.0.5.9 and earlier
 
-### Added
-- **EC-DSA Log Shield**: Authenticated log encryption with machine-bound P-256 keys stored in the system keyring.
-- **FS-Verity Kernel Integrity**: Read-only lock on signature and block databases via `fsverity`.
-- **Opportunistic Bubblewrap Sandboxing**: Native host runs inside a `bwrap` container when available.
-- **High-Speed WASM Security Shield**: Homograph and DGA detection ported to WebAssembly.
-- **Anti-Freeze protection**: Time-lock signed headers on threat databases prevent replay/freeze attacks.
-- **Zero-Knowledge domain whitelist**: Trusted domains stored as salted hashes, never in plaintext.
-- Session key rotation every 6 hours with honeypot decoys.
-- On-access scanning status detection (`clamonacc` / `clamav-daemon`).
-
-### Changed
-- Removed unused `scripting` and `cookies` browser permissions.
-- Clickjacking shield hardened with numeric/alpha analysis and broader interactive element detection.
-
----
-
-## [0.0.5.9] and earlier
-
-- TPM 2.0 / P-256 ECDSA sealing (ERT).
-- Secure session key rotation with honeypot decoys.
-- Keylogger detection, DOM anomaly protection, visual spoofing detectors.
-- Tor/SOCKS5 update routing and Canvas/WebGL fingerprint poisoning.
-- SHA-256 integrity verification during cross-filesystem deployment.
-- Shannon entropy & N-gram robotic domain detection (DGA heuristics).
-- Privacy-preserving global threat lookups (k-anonymity prefix model).
-- New-domain phishing detection via Certificate Transparency logs.
-- Privacy-first trusted domain storage.
+TPM 2.0 and P-256 ECDSA sealing, ERT.
+Secure session key rotation with honeypot decoys.
+Keylogger detection, DOM anomaly protection, and visual spoofing detectors.
+Tor and SOCKS5 update routing plus Canvas and WebGL fingerprint poisoning.
+SHA-256 integrity verification during cross-filesystem deployment.
+Shannon entropy and N-gram robotic domain detection, DGA heuristics.
+Privacy-preserving global threat lookups using k-anonymity prefix model.
+New-domain phishing detection via Certificate Transparency logs.
+Privacy-first trusted domain storage.

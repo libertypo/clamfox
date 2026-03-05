@@ -1,39 +1,54 @@
-# Security Policy
+Security Policy
 
-## Supported Versions
+Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.0.6.x | ✅ Current |
-| < 0.0.6 | ❌ No longer maintained |
+Version 0.0.6.x is currently supported.
+Versions older than 0.0.6 are no longer maintained.
 
-## Reporting a Vulnerability
+Reporting a Vulnerability
 
-**Please do NOT open a public GitHub issue for security vulnerabilities.**
+Do not open a public GitHub issue for security vulnerabilities.
 
-Report security issues privately via email:
-
-**`obvi84@gmail.com`** — Subject: `[ClamFox Security]`
+Report security issues privately by email:
+obvi84@gmail.com
+Use subject: ClamFox Security
 
 Include as much detail as possible:
-- A description of the vulnerability
-- Steps to reproduce
-- Affected component (extension JS, native host Python, WASM shield, installer)
-- Potential impact
+Description of the vulnerability.
+Steps to reproduce.
+Affected component, such as extension JavaScript, native host Python, WASM shield, or installer.
+Potential impact.
 
-You will receive an acknowledgement within **72 hours**. We aim to release a fix within **14 days** of a confirmed report. You are welcome to request credit in the release notes.
+Acknowledgement target is within 72 hours.
+Fix target is within 14 days after confirmed report.
+You may request credit in release notes.
 
-## Security Design
+Security Design
 
-ClamFox is designed around a threat model that assumes the local machine may be semi-hostile. Key security properties:
+ClamFox assumes a threat model where the local machine may be semi-hostile.
+Core security properties:
 
-- **Handshake authentication**: A machine-unique random secret is generated at install time. Every request from the extension to the native host is authenticated with this secret. Replays and injection from other local processes are rejected.
-- **Host integrity verification**: The native host binary hash is verified by the extension before each scan.
-- **WASM sandboxing**: Performance-critical checks (homograph, DGA detection) run inside Firefox's WebAssembly sandbox, isolated from OS access.
-- **Bubblewrap / AppArmor**: The native host optionally runs inside a `bubblewrap` sandbox or AppArmor profile (`host/clamfox.apparmor`) to enforce least-privilege filesystem access.
-- **TPM sealing (ERT)**: On machines with a TPM 2.0, the session key is hardware-sealed. Extraction requires physical access.
-- **No bundled secrets**: Signature databases and machine keys are generated at runtime and are never committed to the repository.
+Handshake authentication.
+A machine-unique random secret is generated at install time.
+Every request from extension to native host is authenticated with this secret.
+Replay and local injection attempts are rejected.
 
-## Known Limitations
+Host integrity verification.
+The native host binary hash is verified by the extension before each scan.
 
-See `TODO.txt` for open hardening items (runtime integrity checksums, Rust rewrite of native IPC).
+WASM sandboxing.
+Performance-critical checks such as homograph and DGA detection run inside Firefox WebAssembly sandbox with no direct OS access.
+
+Bubblewrap and AppArmor.
+The native host can run inside bubblewrap sandbox or AppArmor profile at host/clamfox.apparmor for least-privilege filesystem access.
+
+TPM sealing, ERT.
+On systems with TPM 2.0, session keys are hardware-sealed.
+Extraction requires physical access.
+
+No bundled secrets.
+Signature databases and machine keys are generated at runtime and are not committed to the repository.
+
+Known Limitations
+
+See TODO.txt for open hardening items including runtime integrity checksums and native IPC hardening roadmap.

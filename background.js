@@ -17,6 +17,7 @@ function runIntegrityAudit() {
 runIntegrityAudit();
 
 const NATIVE_HOST_NAME = "clamav_host";
+const HOST_CHECK_TIMEOUT_MS = 20000;
 let HOST_AVAILABLE = false; // Detected at runtime
 let MAIN_MESSAGE_LISTENER_READY = false;
 
@@ -157,7 +158,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             const secret = await getSecret();
-            const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: secret }, 5000);
+            const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: secret }, HOST_CHECK_TIMEOUT_MS);
             if (res && res.secret) delete res.secret;
             sendResponse(res || { status: "error", error: "No response from host." });
         } catch (e) {
@@ -411,8 +412,25 @@ browser.downloads.onChanged.addListener(async (delta) => {
     if (delta.state && delta.state.current === "complete") {
         dbg("Download complete event received for ID:", delta.id);
         const items = await browser.downloads.search({ id: delta.id });
+        let item = null;
         if (items.length > 0) {
-            const item = items[0];
+            item = items[0];
+        } else {
+            // Fallback: sometimes the downloads API can transiently fail to return
+            // the completed item by id, but we may still have a tracked filename.
+            const tracked = activeDownloads.get(delta.id);
+            if (tracked && tracked.filename) {
+                item = { id: delta.id, filename: tracked.filename };
+            }
+        }
+
+        if (item && item.filename) {
+            browser.notifications.create(`scan-${delta.id}`, {
+                type: "basic",
+                iconUrl: "icons/scanning.svg",
+                title: "ClamFox Analysis",
+                message: `Scanning downloaded file: ${item.filename.split('/').pop() || item.filename}...`
+            }).catch(() => { });
 
             // SECURITY HARDENING: Lock the file from the OS BEFORE the scan reaches the user
             try {
@@ -427,6 +445,8 @@ browser.downloads.onChanged.addListener(async (delta) => {
 
             // Ensure our engine knows it's a quarantined target if routing was successful
             performScan(item.filename, "file", item.id);
+        } else {
+            console.warn("Download completion detected but no filename available for scan:", delta.id);
         }
         activeDownloads.delete(delta.id);
         return;
@@ -637,7 +657,7 @@ async function getSecret(forceRefresh = false) {
     try {
         dbg("🔒 Security Handshake starting...");
         // Send a bare check to get the current secret
-        const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check" }, 5000);
+        const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check" }, HOST_CHECK_TIMEOUT_MS);
 
         if (response && (response.integrity_ok === false || response.binary_ok === false)) {
             console.warn("🛡️ SECURITY ALERT: Host seal broken. Re-seal required for full protection.");
@@ -1108,6 +1128,12 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
 }
 
 async function performScan(target, type, downloadId = null, tabId = null) {
+    // A completed download scan must always run even if a recent partial scan
+    // touched the same path moments earlier.
+    if (type === "file") {
+        fileScanLimiter.reset(target);
+    }
+
     // Security: Rate limit scans of same file to prevent DoS
     if (!fileScanLimiter.canScan(target)) {
         dbg(`Scan rate-limited for: ${target}`);
@@ -1283,7 +1309,7 @@ async function performScan(target, type, downloadId = null, tabId = null) {
                 name: displayName,
                 status: response.status,
                 virus: response.virus || (response.mb && response.mb.status === "mb_infected" ? "MalwareBazaar Flag" : null),
-                error: response.error,
+                error: response.details ? `${response.error || 'Error'}: ${response.details}` : response.error,
                 time: Date.now(),
                 type: type,
                 fullTarget: target
@@ -1361,7 +1387,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else if (message.action === "proxy_check") {
             try {
                 dbg("Diagnostic: Starting proxy_check...");
-                const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: secret });
+                const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: secret }, HOST_CHECK_TIMEOUT_MS);
                 dbg("Diagnostic: proxy_check success:", res);
 
                 // Keep secret in sync: If host returns a new secret during check, store it
@@ -1382,7 +1408,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Force refresh on failure
                 try {
                     const newSecret = await getSecret(true);
-                    const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: newSecret });
+                    const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: newSecret }, HOST_CHECK_TIMEOUT_MS);
                     dbg("Diagnostic: proxy_check success after refresh:", res);
 
                     if (res && res.secret) {

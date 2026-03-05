@@ -23,6 +23,8 @@ host/verify_pub
 host/trust_db.json
 host/vault_pub.pem
 host/quarantine/
+host/__pycache__/
+host/signatures/yara-rules-core.yar
 
 # Build Artifacts / Distribution Packages
 *.xpi

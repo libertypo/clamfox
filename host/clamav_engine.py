@@ -1,5 +1,9 @@
 #!/usr/bin/python3
 import sys
+
+# Avoid writing .pyc files under /opt/clamfox when confined by AppArmor.
+sys.dont_write_bytecode = True
+
 import json
 import struct
 import subprocess
@@ -104,7 +108,17 @@ _thread_pool = ThreadPoolExecutor(max_workers=6)
 # Process pool: CPU-bound tasks (YARA scanning, hashing). Capped at 4 to protect
 # low-end hardware and avoid spawning more processes than logical cores.
 _process_pool_max_workers = min(os.cpu_count() or 2, 4)
-_process_pool = ProcessPoolExecutor(max_workers=_process_pool_max_workers)
+
+def _create_process_pool_safely(reason):
+    """Create process pool with safe fallback when system confinement blocks SemLock."""
+    try:
+        return ProcessPoolExecutor(max_workers=_process_pool_max_workers)
+    except Exception as e:
+        if "log_debug" in globals():
+            log_debug(f"Process pool unavailable ({reason}): {e}. Falling back to sequential deep scan mode.")
+        return None
+
+_process_pool = _create_process_pool_safely("initialization")
 _process_pool_lock = threading.Lock()
 
 def _recreate_process_pool_locked(reason):
@@ -119,8 +133,9 @@ def _recreate_process_pool_locked(reason):
     except Exception as e:
         log_debug(f"Process pool stale shutdown warning: {e}")
 
-    _process_pool = ProcessPoolExecutor(max_workers=_process_pool_max_workers)
-    log_debug(f"Process pool recreated: {reason}")
+    _process_pool = _create_process_pool_safely(f"recreate: {reason}")
+    if _process_pool is not None:
+        log_debug(f"Process pool recreated: {reason}")
     return _process_pool
 
 def _get_process_pool():
@@ -146,6 +161,14 @@ def _scan_members_in_process_pool(all_files, context_label):
     futures = []
     try:
         pool = _get_process_pool()
+        if pool is None:
+            # Confinement-safe fallback path: keep scanning functional even without process semaphores.
+            for f in all_files:
+                result = scan_file_basic(f)
+                if result.get("status") == "infected":
+                    return result
+            return None
+
         futures = [pool.submit(scan_file_basic, f) for f in all_files]
         for future in futures:
             try:
@@ -786,6 +809,19 @@ def check_clamav(verify=False):
 
 def KEYRING_NAME(): return "ClamFox-Security-Vault"
 
+_KEYRING_AVAILABLE = None
+
+def _is_keyring_available():
+    """Return True when secret-tool and user DBus session are available."""
+    global _KEYRING_AVAILABLE
+    if _KEYRING_AVAILABLE is not None:
+        return _KEYRING_AVAILABLE
+
+    has_secret_tool = shutil.which("secret-tool") is not None
+    has_dbus = bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
+    _KEYRING_AVAILABLE = bool(has_secret_tool and has_dbus)
+    return _KEYRING_AVAILABLE
+
 def _validate_keyring_args(key, value=None):
     """
     STRICT VALIDATION: Prevent argument injection into secret-tool.
@@ -807,9 +843,11 @@ def _validate_keyring_args(key, value=None):
 def keyring_get(key):
     """Retrieve sensitive data from System Keyring using secret-tool."""
     try:
+        if not _is_keyring_available():
+            return None
         _validate_keyring_args(key)
         cmd = ["secret-tool", "lookup", "application", "clamfox", "type", "security-data", "key", key]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
         if res.returncode == 0:
             return res.stdout.strip()
     except Exception as e:
@@ -819,12 +857,14 @@ def keyring_get(key):
 def keyring_set(key, value):
     """Store sensitive data in System Keyring using secret-tool."""
     try:
+        if not _is_keyring_available():
+            return False
         _validate_keyring_args(key, value)
         # secret-tool store --label="ClamFox" application clamfox type security-data key <key>
         cmd = ["secret-tool", "store", "--label=ClamFox Security Vault", 
                "application", "clamfox", "type", "security-data", "key", key]
-        subprocess.run(cmd, input=value, text=True, timeout=5)
-        return True
+        res = subprocess.run(cmd, input=value, text=True, timeout=1)
+        return res.returncode == 0
     except Exception as e:
         log_debug(f"Keyring Store Error (secret-tool): {e}")
         return False
@@ -842,15 +882,24 @@ def load_config():
         except Exception as e:
             log_debug(f"Config Load Error: {e}")
     
-    # Prioritize Keyring for sensitive items
+    # Prioritize keyring, then fallback to file-backed secrets when unavailable.
     vault_secret = keyring_get("secret")
-    if vault_secret: config["secret"] = vault_secret
+    if vault_secret:
+        config["secret"] = vault_secret
+    elif config.get("fallback_secret"):
+        config["secret"] = config.get("fallback_secret")
     
     vault_hash = keyring_get("integrity_hash")
-    if vault_hash: config["integrity_hash"] = vault_hash
+    if vault_hash:
+        config["integrity_hash"] = vault_hash
+    elif config.get("fallback_integrity_hash"):
+        config["integrity_hash"] = config.get("fallback_integrity_hash")
     
     vault_hp = keyring_get("honeypot_secret")
-    if vault_hp: config["honeypot_secret"] = vault_hp
+    if vault_hp:
+        config["honeypot_secret"] = vault_hp
+    elif config.get("fallback_honeypot_secret"):
+        config["honeypot_secret"] = config.get("fallback_honeypot_secret")
     
     # --- ERT Hardware Unsealing ---
     if config.get("ert_enabled") and config.get("ert_sealed"):
@@ -880,17 +929,21 @@ def save_config(config):
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     
     with _config_lock:
+        fallback_values = {}
         # 1. Update Keyring
         try:
             for key in SENSITIVE_CONFIG_KEYS:
                 if key in config:
-                    keyring_set(key, str(config[key]))
+                    stored = keyring_set(key, str(config[key]))
+                    if not stored:
+                        fallback_values[f"fallback_{key}"] = str(config[key])
         except Exception as e:
             log_debug(f"Keyring persistent error: {e}")
                 
         # 2. Update File (stripped of sensitive data)
         try:
             public_config = {k: v for k, v in config.items() if k not in SENSITIVE_CONFIG_KEYS}
+            public_config.update(fallback_values)
             with open(config_path, "w") as f:
                 json.dump(public_config, f, indent=4)
         except PermissionError:
@@ -2397,9 +2450,30 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
                     result["quarantined"] = quarantined
                     
         return result
+    except PermissionError as e:
+        log_debug(f"CRITICAL SCAN FAILURE (PermissionError) for {filepath}: {e}")
+        return {
+            "status": "error",
+            "error": _("File access denied during scan"),
+            "details": f"{type(e).__name__}: {e}"
+        }
+    except OSError as e:
+        log_debug(f"CRITICAL SCAN FAILURE (OSError) for {filepath}: {e}")
+        err_no = getattr(e, "errno", None)
+        detail = f"{type(e).__name__}(errno={err_no}): {e}" if err_no is not None else f"{type(e).__name__}: {e}"
+        return {
+            "status": "error",
+            "error": _("System processing failure"),
+            "details": detail[:200]
+        }
     except Exception as e:
-        log_debug(f"CRITICAL SCAN FAILURE for {filepath}: {str(e)}")
-        return {"status": "error", "error": _("System processing failure")}
+        log_debug(f"CRITICAL SCAN FAILURE for {filepath}: {e}")
+        detail = f"{type(e).__name__}: {e}"
+        return {
+            "status": "error",
+            "error": _("System processing failure"),
+            "details": detail[:200]
+        }
     finally:
         if fd is not None:
             try:
@@ -2658,11 +2732,12 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 if "secret" in config: keyring_set("secret", str(config["secret"]))
                 keyring_set("integrity_hash", current_hash)
                 
-                # 2. Extract public config and write via pkexec
+                # 2. Extract public config and write via mandatory elevation.
+                # Security policy: reseal must always require explicit authorization.
                 public_config = {k: v for k, v in config.items() if k not in SENSITIVE_CONFIG_KEYS}
                 
                 json_str = json.dumps(public_config, indent=4)
-                # Secure Writing: Use tee via pkexec to avoid shell injection and handling piping safely
+                # Secure writing via pkexec+tee without shell interpolation.
                 cmd = ['pkexec', 'tee', config_path]
                 res = subprocess.run(cmd, input=json_str, text=True, capture_output=True, timeout=60)
                 
@@ -2730,6 +2805,12 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 installed, path, is_daemon = check_clamav(verify=True)
                 run_dir = get_run_dir()
                 url_db_path = os.path.join(run_dir, "urldb.txt")
+                if not secret:
+                    import secrets
+                    secret = secrets.token_urlsafe(32)
+                    config["secret"] = secret
+                    save_config(config)
+                    log_debug("Generated fallback handshake secret (keyring unavailable or empty).")
                 if not os.path.exists(url_db_path):
                     log_debug("Check: Intelligence DB missing, triggering background update.")
                     threading.Thread(target=update_intelligence, kwargs={"force": True}, daemon=True).start()

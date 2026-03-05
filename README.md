@@ -1,70 +1,62 @@
-# ClamFox
+ClamFox
+
 Firefox extension to filter traffic and scan downloads using ClamAV.
 
-## 🛡️ Hybrid Architecture
-ClamFox is designed around a **native-host architecture**.
+Architecture
 
-The Firefox extension provides browser-side shields, while the **ClamFox Native Bridge** enables ClamAV scanning, file locking, and host-backed intelligence workflows.
+ClamFox is designed around a native-host architecture.
+The Firefox extension provides browser-side shields.
+The ClamFox Native Bridge enables ClamAV scanning, file locking, and host-backed intelligence workflows.
 
----
+Privacy First
 
-## 🔒 Privacy First
+ClamFox is designed with a privacy-first model and no data collection.
 
-ClamFox is designed with a "Privacy-First" model — protection without data collection.
+100 percent local file scanning. Files are never uploaded. ClamAV runs on your CPU.
+Local threat cache. The full URLhaus blocklist is downloaded to your disk. Zero URLs are sent to external servers during browsing.
+Local-only history. Block history and scan logs stay in browser local storage and are never synced.
+Secure handshake. A machine-unique cryptographic secret is generated at install time so only your extension can talk to your scanner bridge.
+No accounts or tracking. No registration, analytics, telemetry, or user ID.
+Open source. Browser-to-host communication is visible in this repository.
 
-- **100% local file scanning** — files are never uploaded; ClamAV runs on your CPU.
-- **Local threat cache** — the full URLhaus blocklist is downloaded to your disk. Zero URLs are sent to external servers during browsing.
-- **Local-only history** — block history and scan logs live exclusively in browser local storage; never synced.
-- **Secure handshake** — a machine-unique cryptographic secret is generated at install time; only your extension can talk to your scanner bridge.
-- **No accounts or tracking** — no registration, no analytics, no telemetry, no user ID.
-- **Open source** — all browser↔host communication is visible in this repository.
+See PRIVACY_SUMMARY.txt for a full privacy architecture summary including known trade-offs.
 
-> See [PRIVACY_SUMMARY.txt](PRIVACY_SUMMARY.txt) for a full privacy architecture summary including known trade-offs.
+Requirements
 
----
+OS: Linux (native install)
+Browser: Firefox 128 or newer, ESR supported
+Engine: ClamAV (clamscan or clamd)
+Native host runtime: Python 3.8 or newer
 
-## 📦 Requirements
+The native host installation in host/install.sh is required for full ClamFox operation.
 
-| Component | Minimum |
-|-----------|---------|
-| OS        | Linux (native install) |
-| Browser   | Firefox 128+ (ESR supported) |
-| Engine    | ClamAV (`clamscan` or `clamd`) |
-| Native    | Python 3.8+ |
+Container support note:
+Snap and Flatpak browsers are currently not supported for the host scan engine due to sandbox restrictions.
+Native Firefox is currently required.
 
-> [!IMPORTANT]
-> The native host installation (`host/install.sh`) is required for full ClamFox operation.
+Setup and Deployment
 
-> [!NOTE]
-> **Container Support**: Snap and Flatpak browsers are currently not supported for the host scan engine due to sandbox restrictions. Sorry folks, only native Firefox for now. Snap and Flatpak support is planned for future releases.
-
----
-
-## 🚀 Setup & Deployment
-
-```bash
-# 1. Register the native messaging host (generates machine-unique secret)
+Register the native messaging host (generates machine-unique secret):
 cd host && ./install.sh
 
-# 2. (Optional) Build the WASM shield from source
+Optional. Build the WASM shield from source:
 ./build_wasm.sh
 
-# 3. Package for distribution
-./package.sh   # produces .xpi and AMO source bundles
-```
+Package for distribution:
+./package.sh
 
-**Hardware Trust (ERT)**: If a TPM 2.0 is present, the engine uses it for hardware-anchored module signing.
+Hardware trust (ERT):
+If a TPM 2.0 is present, the engine uses it for hardware-anchored module signing.
 
----
+License
 
-## ⚖️ License
+GNU General Public License v3. See LICENSE.
 
-GNU General Public License v3 — see [LICENSE](LICENSE).
+Contributing
 
-## 🤝 Contributing
+See CONTRIBUTING.md.
+To report a security vulnerability privately, see SECURITY.md.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security vulnerability privately, see [SECURITY.md](SECURITY.md).
+Changelog
 
-## 📋 Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for a full history of changes.
+See CHANGELOG.md for full change history.

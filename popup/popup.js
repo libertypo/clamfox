@@ -773,7 +773,7 @@ async function renderLogs() {
             } else if (scan.status === 'progress') {
                 statusText = "Scanning...";
             } else {
-                statusText = "Error: System processing failure";
+                statusText = `Error: ${scan.error || 'System processing failure'}`;
             }
 
             meta.textContent = `${timeStr} • ${statusText}`;
