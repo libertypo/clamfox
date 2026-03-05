@@ -2,9 +2,9 @@
 Firefox extension to filter traffic and scan downloads using ClamAV.
 
 ## 🛡️ Hybrid Architecture
-ClamFox supports a **Dual-Mode** deployment:
-1. **Standalone (AMO Mode)**: Works purely inside Firefox. Provides Visual Anti-Phishing, Prompt Injection Shields, Honeypots, and Privacy Hardening.
-2. **Total Defense (Core Mode)**: When the **ClamFox Native Bridge** is present, the extension unlocks OS-level ClamAV scanning, atomic file locking, and system-wide clipboard protection.
+ClamFox is designed around a **native-host architecture**.
+
+The Firefox extension provides browser-side shields, while the **ClamFox Native Bridge** enables ClamAV scanning, file locking, and host-backed intelligence workflows.
 
 ---
 
@@ -27,10 +27,13 @@ ClamFox is designed with a "Privacy-First" model — protection without data col
 
 | Component | Minimum |
 |-----------|---------|
-| OS        | Linux (Standard/Native) |
+| OS        | Linux (native install) |
 | Browser   | Firefox 128+ (ESR supported) |
 | Engine    | ClamAV (`clamscan` or `clamd`) |
 | Native    | Python 3.8+ |
+
+> [!IMPORTANT]
+> The native host installation (`host/install.sh`) is required for full ClamFox operation.
 
 > [!NOTE]
 > **Container Support**: Snap and Flatpak browsers are currently not supported for the host scan engine due to sandbox restrictions. Sorry folks, only native Firefox for now. Snap and Flatpak support is planned for future releases.

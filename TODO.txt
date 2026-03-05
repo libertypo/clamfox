@@ -5,6 +5,11 @@
 
 ### 3. ADVANCED DEFENSE-IN-DEPTH (Hardening)
 - [ ] Rewrite critical Native Messaging and TPM unsealing logic in Rust to eliminate memory-safety vulnerabilities (buffer overflows, use-after-free) inherent in high-performance C/Python glue.(tough one)
+- [ ] Plan and implement a true standalone mode (no native host dependency) with explicit feature gating and documented security trade-offs.
+- [ ] Standalone gate: avoid hard-blocking all navigation when native host is unavailable; keep WASM/browser heuristics active.
+- [ ] Standalone manifest profile: remove `nativeMessaging` and host-only capabilities from AMO/standalone build.
+- [ ] Standalone UI profile: hide/disable host-only popup actions (`proxy_*`, reseal, quarantine/log host views) and show clear mode label.
+- [ ] Packaging cleanup: either remove standalone artifact generation until parity is real, or enforce standalone-only feature flags in `package.sh`.
 - [x] Implement `FS-Verity` or advanced AppArmor profile enforcement to ensure signatures and blocks have not been tampered with by other local processes between check and load.
 - [x] Transition from standard execution to a restricted `bubblewrap` or `cgroup` container for the native host, enforcing strict "Need-to-Know" access to the filesystem.
 - [x] Port high-speed matching and homograph logic to WebAssembly. This allows critical checks to run inside the browser's sandbox, reducing the attack surface exposed to the native bridge.

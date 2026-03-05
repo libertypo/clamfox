@@ -717,17 +717,13 @@ browser.webRequest.onBeforeRequest.addListener(
             return {};
         }
 
-        // If we have just passed a challenge OR have a valid cf_clearance cookie, skip scanning
+        // Skip scanning only for explicit challenge transition or user whitelist.
+        // Do not trust cf_clearance cookie-name presence alone (spoofable by attacker-controlled origins).
         if (url) {
             const hasTempBypass = allowedAfterChallenge.has(url.hostname);
             const isUserWhitelisted = isWhitelisted(url.hostname);
-            let hasCookieClearance = false;
-            try {
-                const cookies = await browser.cookies.getAll({ url: details.url, name: "cf_clearance" });
-                hasCookieClearance = cookies && cookies.length > 0;
-            } catch (e) { }
 
-            if (hasTempBypass || hasCookieClearance || isUserWhitelisted) {
+            if (hasTempBypass || isUserWhitelisted) {
                 return {};
             }
         }
