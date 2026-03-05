@@ -1,0 +1,17 @@
+[
+    {
+        "id": "CVE-2025-1234",
+        "description": "Native host insecure JSON parsing led to crash on empty arrays",
+        "test_fn": "test_cve_2025_1234"
+    },
+    {
+        "id": "CVE-LOCAL-2026-0001",
+        "description": "Main-frame URL scan bypass via spoofable cf_clearance cookie-name trust",
+        "test_fn": "test_cve_local_2026_0001"
+    },
+    {
+        "id": "CVE-LOCAL-2026-0002",
+        "description": "Malformed streaming scan payload accepted without schema validation",
+        "test_fn": "test_cve_local_2026_0002"
+    }
+]

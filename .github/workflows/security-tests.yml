@@ -1,0 +1,33 @@
+name: Security Regression Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  security-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Python Security Suite
+        run: python test_security_suite.py
+
+      - name: Run JS Security Suite
+        run: node test_security_suite.js
+
+      - name: Run CVE Catalog Regression Harness
+        run: python integration_tests.py

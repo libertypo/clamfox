@@ -47,11 +47,7 @@ test_script.js
 test_update.py
 /tmp/test_sandboxing.py
 
-# Security test suites and integration helpers (generated/maintained locally, not pushed)
-test_security_suite.js
-test_security_suite.py
-integration_tests.py
-cve_catalog.json
+# Security test suites and integration helpers are tracked in git.
 
 *.swp
 
