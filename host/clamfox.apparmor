@@ -1,6 +1,6 @@
 #include <tunables/global>
 
-/opt/clamfox/clamav_engine.py {
+/opt/clamfox/clamav_host.py {
   #include <abstractions/base>
   #include <abstractions/python>
   #include <abstractions/nameservice>
@@ -32,9 +32,21 @@
   /usr/local/lib/python3*/** r,
   /usr/include/python3*/** r,
 
-  # Allow reading/writing its own directory (for logs, quarantine, config)
+  # Code and static assets are read-only by default.
   /opt/clamfox/ r,
-  /opt/clamfox/** rw,
+  /opt/clamfox/*.py r,
+  /opt/clamfox/*.json r,
+  /opt/clamfox/locales/** r,
+
+  # Explicit mutable files/directories only
+  /opt/clamfox/config.json rw,
+  /opt/clamfox/alert_log.txt rw,
+  /opt/clamfox/vault_pub.pem rw,
+  /opt/clamfox/vault_priv.enc rw,
+  /opt/clamfox/signatures/ rw,
+  /opt/clamfox/signatures/** rw,
+  /opt/clamfox/quarantine/ rw,
+  /opt/clamfox/quarantine/** rw,
 
   # Runtime and Temp areas for intelligence caches
   /run/user/[0-9]*/clamfox/ rw,

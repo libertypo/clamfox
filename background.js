@@ -2,11 +2,6 @@
 const DEBUG = false;
 const dbg = (...args) => { if (DEBUG) console.log(...args); };
 
-if (!DEBUG) {
-    console.warn = () => { };
-    console.error = () => { };
-}
-
 // Supply-Chain Canary (Injected at build time)
 const CLAMFOX_CANARY = "PLACEHOLDER_CANARY";
 
@@ -23,11 +18,14 @@ runIntegrityAudit();
 
 const NATIVE_HOST_NAME = "clamav_host";
 let HOST_AVAILABLE = false; // Detected at runtime
+let MAIN_MESSAGE_LISTENER_READY = false;
 
 const SCAN_INTERVAL_BYTES = 10 * 1024 * 1024; // Scan every 10MB
 const allowedAfterChallenge = new Set(); // Tracks hosts that just completed a Cloudflare challenge
 const ACTIVE_CHALLENGES = new Map(); // tabId -> expiration timestamp
 const USER_WHITELIST = new Set(); // Persistent overrides
+const USER_WHITELIST_EXPIRY = new Map(); // domain -> expiry epoch ms
+const USER_BYPASS_TTL_MS = 24 * 60 * 60 * 1000; // 24h default manual bypass TTL
 
 // WASM Shield State
 let WASM_READY = false;
@@ -41,11 +39,57 @@ let wasmExports = null;
  * Called during startup to initialize USER_WHITELIST Set.
  */
 async function initWhitelist() {
-    const storage = await browser.storage.local.get("userWhitelist");
-    if (storage.userWhitelist && Array.isArray(storage.userWhitelist)) {
-        storage.userWhitelist.forEach(domain => USER_WHITELIST.add(domain));
-        dbg(`🛡️ USER WHITELIST: Loaded ${USER_WHITELIST.size} domains.`);
+    const now = Date.now();
+    const storage = await browser.storage.local.get({ userWhitelist: [], userWhitelistExpiry: {} });
+    let changed = false;
+
+    if (Array.isArray(storage.userWhitelist)) {
+        storage.userWhitelist.forEach(domain => {
+            if (typeof domain !== "string" || !domain) return;
+
+            // Backward-compatibility: old entries had no TTL metadata.
+            let expiresAt = Number(storage.userWhitelistExpiry[domain]);
+            if (!Number.isFinite(expiresAt)) {
+                expiresAt = now + USER_BYPASS_TTL_MS;
+                changed = true;
+            }
+
+            if (expiresAt > now) {
+                USER_WHITELIST.add(domain);
+                USER_WHITELIST_EXPIRY.set(domain, expiresAt);
+            } else {
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            await persistUserWhitelist();
+        }
+
+        dbg(`🛡️ USER WHITELIST: Loaded ${USER_WHITELIST.size} active domains.`);
     }
+}
+
+function purgeExpiredUserWhitelist() {
+    const now = Date.now();
+    let changed = false;
+
+    for (const [domain, expiresAt] of USER_WHITELIST_EXPIRY.entries()) {
+        if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+            USER_WHITELIST_EXPIRY.delete(domain);
+            USER_WHITELIST.delete(domain);
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+async function persistUserWhitelist() {
+    await browser.storage.local.set({
+        userWhitelist: Array.from(USER_WHITELIST),
+        userWhitelistExpiry: Object.fromEntries(USER_WHITELIST_EXPIRY)
+    });
 }
 
 // getBaseDomain is now provided by psl_data.js
@@ -68,6 +112,11 @@ function isPortal(hostname) {
  */
 function isWhitelisted(hostname) {
     if (!hostname) return false;
+
+    if (purgeExpiredUserWhitelist()) {
+        persistUserWhitelist().catch(() => { });
+    }
+
     // 1. Check Hardcoded/Dynamic High-Value Targets (Secure Portals)
     if (isPortal(hostname)) return true;
 
@@ -85,6 +134,39 @@ const activeDownloads = new Map();
 // reads the source code can predict the honeypot secret.
 let HONEYPOT_SECRET = `cf_honey_${crypto.randomUUID()}`;
 let SESSION_HOST_SECRET = null; // Ephemeral Cryptographic Secret
+
+// Bootstrap bridge: keeps popup diagnostics alive even if later init paths fail.
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (MAIN_MESSAGE_LISTENER_READY) return false;
+    if (!message || !message.action) return false;
+    if (message.action !== "proxy_check" && message.action !== "proxy_reconnect") return false;
+
+    // Apply the same sender trust gate used by the main listener.
+    if (sender.id && sender.id !== browser.runtime.id) return false;
+    const extensionOrigin = browser.runtime.getURL("");
+    const isExtensionPage = sender.url && sender.url.startsWith(extensionOrigin);
+    if (!isExtensionPage) return false;
+
+    (async () => {
+        try {
+            if (message.action === "proxy_reconnect") {
+                SESSION_HOST_SECRET = null;
+                const refreshed = await getSecret(true);
+                sendResponse(refreshed ? { status: "ok" } : { status: "error", error: "Handshake failed. Host may be offline or misconfigured." });
+                return;
+            }
+
+            const secret = await getSecret();
+            const res = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "check", secret: secret }, 5000);
+            if (res && res.secret) delete res.secret;
+            sendResponse(res || { status: "error", error: "No response from host." });
+        } catch (e) {
+            sendResponse({ status: "error", error: "Background bootstrap bridge error." });
+        }
+    })();
+
+    return true;
+});
 
 // Initialized via initBackground()
 
@@ -273,11 +355,11 @@ browser.downloads.onCreated.addListener(async (item) => {
 
     try {
         const secret = await getSecret();
-        const response = await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+        const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
             action: "check_url",
             target: item.url,
             secret: secret
-        });
+        }, 3000);
 
         if (response.status === "malicious") {
             console.error("🛑 DOWNLOAD ABORTED: Malicious Source Detected:", item.url);
@@ -293,13 +375,32 @@ browser.downloads.onCreated.addListener(async (item) => {
                 message: `ClamFox prevented the download of a file from a known malicious site: ${new URL(item.url).hostname}`,
                 priority: 2
             });
-        } else {
+        } else if (response.status === "clean") {
             // Normal source, resume download
             await browser.downloads.resume(item.id).catch(() => { });
+        } else {
+            // Fail-closed: unknown/non-clean verdicts are blocked.
+            await browser.downloads.cancel(item.id).catch(() => { });
+            await browser.downloads.erase({ id: item.id }).catch(() => { });
+            browser.notifications.create({
+                type: "basic",
+                iconUrl: "icons/warning.svg",
+                title: "🛑 DOWNLOAD BLOCKED",
+                message: "ClamFox blocked this download because the security engine returned an invalid reputation verdict.",
+                priority: 2
+            });
         }
     } catch (e) {
-        // Fallback: resume if engine fails (usability)
-        await browser.downloads.resume(item.id).catch(() => { });
+        // Fail-closed: block when source reputation cannot be established.
+        await browser.downloads.cancel(item.id).catch(() => { });
+        await browser.downloads.erase({ id: item.id }).catch(() => { });
+        browser.notifications.create({
+            type: "basic",
+            iconUrl: "icons/warning.svg",
+            title: "⚠️ DOWNLOAD BLOCKED",
+            message: "ClamFox blocked this download because the security engine is unavailable.",
+            priority: 2
+        });
     }
 });
 
@@ -316,11 +417,11 @@ browser.downloads.onChanged.addListener(async (delta) => {
             // SECURITY HARDENING: Lock the file from the OS BEFORE the scan reaches the user
             try {
                 const secret = await getSecret();
-                await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+                await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                     action: "lock",
                     target: item.filename,
                     secret: secret
-                });
+                }, 5000);
                 dbg("🔒 FILE SEALED: Access restricted during analysis.");
             } catch (e) { }
 
@@ -486,6 +587,16 @@ function validateNativeResponse(action, response) {
 
     // 2. Action-Specific Schema Hardening
     switch (action) {
+        case "check_url":
+            if (response.status === "malicious") {
+                if (typeof response.threat !== "string" || response.threat.length > 256) {
+                    throw new Error("Invalid 'threat' identifier in URL reputation response");
+                }
+            }
+            if (response.status === "clean" && response.trust !== undefined && typeof response.trust !== "string") {
+                throw new Error("Invalid 'trust' value in URL reputation response");
+            }
+            break;
         case "scan":
         case "scan_request":
             if (response.status === "malicious") {
@@ -622,7 +733,7 @@ browser.webRequest.onBeforeRequest.addListener(
         }
 
         // Latency Fast-Path: Skip native scanning for trusted High-Value Targets or User Whitelist
-        if (isWhitelisted(url.hostname)) {
+        if (url && isWhitelisted(url.hostname)) {
             return {};
         }
 
@@ -646,39 +757,29 @@ browser.webRequest.onBeforeRequest.addListener(
         try {
             const secret = await getSecret();
 
-            // SECURITY FAIL-OPEN: Don't hang the browser if the host is offline or slow
-            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ status: "timeout" }), 3000));
-            const response = await Promise.race([
-                browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
-                    action: "check_url",
-                    target: details.url,
-                    secret: secret
-                }),
-                timeoutPromise
-            ]);
-
-            if (response.status === "timeout") {
-                const settings = await browser.storage.local.get({ strictMode: false });
-                if (settings.strictMode) {
-                    console.error("🛑 SECURITY FAIL-CLOSED: Host response timed out. Blocking request due to Strict Mode.");
-                    handleMaliciousUrl(details.url, "Scan Timeout (Strict Mode)", details.tabId);
-                    return { cancel: true };
-                }
-                console.warn("🛡️ SECURITY FAIL-OPEN: Host response timed out (3s). Proceeding for stability.");
-                return {};
-            }
-
-            // Cloudflare challenge final bypass: if the URL is a challenge or clearance, ignore any malicious verdict
-            if (details.url.includes("__cf_chl_") || details.url.includes("/cdn-cgi/challenge") || details.url.includes("cf_clearance")) {
-                return {};
-            }
+            const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
+                action: "check_url",
+                target: details.url,
+                secret: secret
+            }, 3000);
 
             if (response.status === "malicious") {
                 handleMaliciousUrl(details.url, response.threat || "URLhaus Blocklist", details.tabId, response.confirmed);
+                return { cancel: true };
             }
-        } catch (e) { }
+
+            if (response.status !== "clean") {
+                console.error("🛑 SECURITY FAIL-CLOSED: Unexpected URL verdict status.", response.status);
+                handleMaliciousUrl(details.url, "Security Engine Invalid Verdict", details.tabId);
+                return { cancel: true };
+            }
+        } catch (e) {
+            console.error("🛑 SECURITY FAIL-CLOSED: URL check pipeline failed.", e);
+            handleMaliciousUrl(details.url, "Security Engine Failure", details.tabId);
+            return { cancel: true };
+        }
     },
-    { urls: ["<all_urls>"] }
+    { urls: ["http://*/*", "https://*/*"] }
 );
 
 function handleMaliciousUrl(urlStr, threatName, tabId, confirmed = false) {
@@ -760,7 +861,7 @@ browser.webRequest.onBeforeRequest.addListener(
             if (details.tabId !== -1) escalateTabProtection(details.tabId);
         }
     },
-    { urls: ["<all_urls>"], types: ["xmlhttprequest", "ping", "websocket", "other"] },
+    { urls: ["http://*/*", "https://*/*"], types: ["xmlhttprequest", "ping", "websocket", "other"] },
     ["requestBody"]
 );
 
@@ -894,7 +995,7 @@ browser.webRequest.onBeforeRequest.addListener(
 
         } catch (e) { }
     },
-    { urls: ["<all_urls>"] }
+    { urls: ["http://*/*", "https://*/*"] }
 );
 
 
@@ -979,11 +1080,11 @@ async function logBlock(name, reason, url, tabId = null, forensicData = null) {
     // PERSISTENT DISK LOGGING (EDR Requirement)
     try {
         const secret = await getSecret();
-        browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+        sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
             action: "log_incident",
             incident: incident,
             secret: secret
-        }).catch(() => { });
+        }, 5000).catch(() => { });
     } catch (e) { }
 
     // EDR CORRELATION: Check if this tab is under active attack
@@ -1033,7 +1134,10 @@ async function performScan(target, type, downloadId = null, tabId = null) {
 
     if (!HOST_AVAILABLE && type !== "url") {
         dbg(`Bypassing ${type} scan (Host Offline): ${target}`);
-        progressUpdate({ status: "complete", result: "clean", msg: "Bypassed (Browser-Only Mode)" });
+        browser.action.setBadgeText({ text: "OFF" });
+        browser.action.setBadgeBackgroundColor({ color: "#f59e0b" });
+        progressUpdate({ status: "complete", result: "error", msg: "Unscanned: Native host offline" });
+        notifyError("Security engine offline: file not scanned.");
         return;
     }
 
@@ -1061,6 +1165,17 @@ async function performScan(target, type, downloadId = null, tabId = null) {
         const port = browser.runtime.connectNative(NATIVE_HOST_NAME);
 
         port.onMessage.addListener(async (response) => {
+            // SECURITY: Validate every streaming scan payload from native host
+            // before it can influence UI state, notifications, or persisted history.
+            try {
+                validateNativeResponse("scan", response);
+            } catch (e) {
+                console.error("🛡️ SECURITY ALERT: Rejected malformed scan stream response:", e, response);
+                notifyError("Security validation rejected scan response.");
+                port.disconnect();
+                return;
+            }
+
             if (response.status === "progress") {
                 progressUpdate({ status: "scanning", percent: response.percent, msg: response.msg });
                 return;
@@ -1118,13 +1233,13 @@ async function performScan(target, type, downloadId = null, tabId = null) {
                 // AUTO-BURN Logic: Automatically neutralizing zero-days globally if enabled
                 if (settings.autoBurnEnabled && (response.status === "infected" || (response.mb && response.mb.status === "mb_infected"))) {
                     dbg("🔥 AUTO-BURN: High-confidence threat detected. Initiating community neutralization...");
-                    browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+                    sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                         action: "report_threat",
                         target: target,
                         type: response.virus || "Automated Detection",
                         details: { forensics: { auto: true, source: "Background Shield" } },
                         secret: secret
-                    }).then(async (burnResp) => {
+                    }, 10000).then(async (burnResp) => {
                         if (burnResp && burnResp.status === "ok") {
                             const bh = await browser.storage.local.get({ blockedHistory: [] });
                             if (bh.blockedHistory.length > 0) {
@@ -1146,11 +1261,11 @@ async function performScan(target, type, downloadId = null, tabId = null) {
                 // SECURITY HARDENING: Release it from the quarantine directory into the user's view
                 try {
                     const secret = await getSecret();
-                    browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+                    sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                         action: "release_quarantine",
                         target: target,
                         secret: secret
-                    }).catch(() => { });
+                    }, 5000).catch(() => { });
                 } catch (e) { }
 
                 setTimeout(() => browser.action.setBadgeText({ text: "" }), 5000);
@@ -1209,6 +1324,7 @@ async function performScan(target, type, downloadId = null, tabId = null) {
     }
 }
 
+MAIN_MESSAGE_LISTENER_READY = true;
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Security: Only allow internal extension messages
     if (sender.id && sender.id !== browser.runtime.id) {
@@ -1317,11 +1433,11 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return { status: "ok" };
         } else if (message.action === "check_trust") {
             try {
-                const response = await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+                const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                     action: "check_url",
                     target: message.url,
                     secret: secret
-                });
+                }, 3000);
 
                 const certInfo = (sender.tab && sender.tab.id) ? CERT_CACHE.get(sender.tab.id) : null;
                 let trustLevel = response.trust || "standard";
@@ -1461,14 +1577,15 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return sender.tab ? sender.tab.id : null;
         } else if (message.action === "bypass_domain") {
             if (message.domain) {
-                dbg(`🛡️ USER OVERRIDE: Persistently whitelisting ${message.domain}`);
-                USER_WHITELIST.add(message.domain);
+                const baseDomain = getBaseDomain(message.domain);
+                const expiresAt = Date.now() + USER_BYPASS_TTL_MS;
+                dbg(`🛡️ USER OVERRIDE: Temporarily whitelisting ${baseDomain} for 24h`);
 
-                // Persist to storage
-                const current = Array.from(USER_WHITELIST);
-                await browser.storage.local.set({ userWhitelist: current });
+                USER_WHITELIST.add(baseDomain);
+                USER_WHITELIST_EXPIRY.set(baseDomain, expiresAt);
+                await persistUserWhitelist();
 
-                return { status: "whitelisted" };
+                return { status: "whitelisted", expiresAt };
             }
         }
         return false;
@@ -1590,9 +1707,9 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
         try {
             const secret = await getSecret();
             // Sync URLHaus
-            await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, { action: "update_urldb", secret: secret });
+            await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "update_urldb", secret: secret }, 15000);
             // Sync YARA
-            await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, { action: "update_yara", secret: secret });
+            await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, { action: "update_yara", secret: secret }, 15000);
             dbg("✅ Scheduled Sync Completed.");
         } catch (e) {
             console.error("❌ Scheduled Sync Failed:", e);
@@ -1602,10 +1719,10 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
         dbg("🔑 Scheduled session key rotation starting...");
         try {
             const currentSecret = await getSecret();
-            const response = await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+            const response = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                 action: "rotate_secret",
                 secret: currentSecret
-            });
+            }, 8000);
             if (response && response.status === "ok" && response.secret) {
                 SESSION_HOST_SECRET = response.secret;
                 dbg("🔑 Session secret rotated successfully.");
@@ -1706,10 +1823,10 @@ async function updateSecurePortals() {
         // 2. Sync with Host for Dynamic Researcher/Cloudflare/Talos Whitelist
         try {
             const secret = await getSecret();
-            const intel = await browser.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+            const intel = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                 action: "get_intel",
                 secret: secret
-            });
+            }, 8000);
             if (intel.status === "ok") {
                 if (intel.hvts) currentHVTs = intel.hvts;
                 if (intel.whitelist) dynamicWhitelist = intel.whitelist;
@@ -1767,7 +1884,7 @@ browser.webRequest.onHeadersReceived.addListener(
         } catch (e) { }
         return {};
     },
-    { urls: ["<all_urls>"], types: ["main_frame"] },
+    { urls: ["http://*/*", "https://*/*"], types: ["main_frame"] },
     ["responseHeaders"]
 );
 

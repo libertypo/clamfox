@@ -8,6 +8,110 @@ body {
     overflow-x: hidden;
 }
 
+.hidden {
+    display: none !important;
+}
+
+.display-flex {
+    display: flex !important;
+}
+
+.display-block {
+    display: block !important;
+}
+
+.row-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.row-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.mt-10 {
+    margin-top: 10px;
+}
+
+.mt-12 {
+    margin-top: 12px;
+}
+
+.mt-15 {
+    margin-top: 15px;
+}
+
+.text-primary {
+    color: var(--primary) !important;
+}
+
+.text-success {
+    color: var(--success) !important;
+}
+
+.text-danger {
+    color: var(--danger) !important;
+}
+
+.text-warning {
+    color: var(--warning) !important;
+}
+
+.text-dim {
+    color: var(--text-dim) !important;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.small-text {
+    font-size: 0.75rem;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 20px;
+    font-size: 0.85rem;
+}
+
+.btn-block {
+    width: 100% !important;
+}
+
+.btn-compact {
+    width: auto !important;
+    padding: 5px 15px !important;
+}
+
+.log-item-threat {
+    border-left: 3px solid #ef4444;
+}
+
+.clickable {
+    cursor: pointer;
+}
+
+.report-danger {
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    padding: 4px 8px;
+}
+
+.report-success {
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.forensic-actions {
+    margin-top: 15px;
+    display: flex;
+    gap: 10px;
+}
+
 .container {
     padding: 20px;
     max-height: 600px;
@@ -418,6 +522,10 @@ button:disabled {
 }
 
 .setting-row:last-child {
+    border-bottom: none;
+}
+
+.no-border {
     border-bottom: none;
 }
 

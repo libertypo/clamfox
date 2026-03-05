@@ -1,0 +1,16 @@
+; Minimal SELinux confinement module for ClamFox native host.
+; Loaded by installer when CLAMFOX_MAC_MODE=selinux (or auto on SELinux systems).
+
+(block clamfox_host
+  (type clamfox_host_t)
+  (type clamfox_host_exec_t)
+
+  (typeattributeset domain (clamfox_host_t))
+  (typeattributeset file_type (clamfox_host_exec_t))
+
+  (allow unconfined_t clamfox_host_exec_t (file (read open getattr execute map)))
+  (typetransition unconfined_t clamfox_host_exec_t process clamfox_host_t)
+
+  (allow clamfox_host_t clamfox_host_exec_t (file (entrypoint read open getattr execute map)))
+  (allow clamfox_host_t self (process (fork sigchld signal)))
+)

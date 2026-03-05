@@ -1,5 +1,21 @@
 const NATIVE_HOST_NAME = "clamav_host";
 
+function setToneClass(el, tone) {
+    if (!el) return;
+    el.classList.remove('text-primary', 'text-success', 'text-danger', 'text-dim', 'text-warning');
+    if (tone) el.classList.add(`text-${tone}`);
+}
+
+function setVisible(el, visible, mode = 'block') {
+    if (!el) return;
+    el.classList.remove('hidden', 'display-block', 'display-flex');
+    if (!visible) {
+        el.classList.add('hidden');
+        return;
+    }
+    el.classList.add(mode === 'flex' ? 'display-flex' : 'display-block');
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     translatePage();
     await checkEngine();
@@ -15,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refresh-yara-db').addEventListener('click', forceUpdateYaraDb);
     document.getElementById('view-audit-logs').addEventListener('click', showAuditLogs);
     document.getElementById('close-forensic').addEventListener('click', () => {
-        document.getElementById('forensic-overlay').style.display = 'none';
+        setVisible(document.getElementById('forensic-overlay'), false);
     });
     document.getElementById('report-threat-btn').addEventListener('click', communityBurn);
     document.getElementById('clear-blocks').addEventListener('click', clearBlockHistory);
@@ -64,21 +80,21 @@ async function forceUpdateUrlDb() {
 
     btn.disabled = true;
     text.textContent = browser.i18n.getMessage("updating");
-    text.style.color = "var(--primary)";
+    setToneClass(text, 'primary');
 
     try {
         const response = await browser.runtime.sendMessage({ action: "proxy_update" });
         if (response && response.status === "ok") {
             text.textContent = browser.i18n.getMessage("synced");
-            text.style.color = "var(--success)";
+            setToneClass(text, 'success');
             setTimeout(() => checkEngine(), 1500);
         } else {
             text.textContent = response?.error || browser.i18n.getMessage("updateFailed");
-            text.style.color = "var(--danger)";
+            setToneClass(text, 'danger');
         }
     } catch (error) {
         text.textContent = "Host Error";
-        text.style.color = "var(--danger)";
+        setToneClass(text, 'danger');
         console.error(error);
     } finally {
         btn.disabled = false;
@@ -91,21 +107,21 @@ async function forceUpdateEngineDb() {
 
     btn.disabled = true;
     text.textContent = browser.i18n.getMessage("updating");
-    text.style.color = "var(--primary)";
+    setToneClass(text, 'primary');
 
     try {
         const response = await browser.runtime.sendMessage({ action: "proxy_force_engine_update" });
         if (response && response.status === "ok") {
             text.textContent = browser.i18n.getMessage("engineUpdated");
-            text.style.color = "var(--success)";
+            setToneClass(text, 'success');
             setTimeout(() => checkEngine(), 1500);
         } else {
             text.textContent = response?.error || browser.i18n.getMessage("updateFailed");
-            text.style.color = "var(--danger)";
+            setToneClass(text, 'danger');
         }
     } catch (error) {
         text.textContent = "Scanner Error";
-        text.style.color = "var(--danger)";
+        setToneClass(text, 'danger');
     } finally {
         btn.disabled = false;
     }
@@ -117,22 +133,22 @@ async function forceUpdateYaraDb() {
 
     btn.disabled = true;
     text.textContent = "Syncing YARA...";
-    text.style.color = "var(--primary)";
+    setToneClass(text, 'primary');
 
     try {
         const response = await browser.runtime.sendMessage({ action: "proxy_update_yara" });
         if (response && response.status === "ok") {
             text.textContent = "Syncing in Background";
-            text.style.color = "var(--success)";
+            setToneClass(text, 'success');
             setTimeout(() => checkEngine(), 3000);
         } else {
             text.textContent = response?.error || "Sync Failed";
-            text.style.color = "var(--danger)";
+            setToneClass(text, 'danger');
             console.error(response?.error);
         }
     } catch (error) {
         text.textContent = "Host Connection Error";
-        text.style.color = "var(--danger)";
+        setToneClass(text, 'danger');
     } finally {
         btn.disabled = false;
     }
@@ -157,7 +173,7 @@ async function initSettings() {
         autoBurnEnabled: false,
         commandShieldEnabled: true,
         suppressTrustedToasts: true,
-        strictMode: false
+        strictMode: true
     });
 
     freqSlider.value = settings.scanFrequencyMB;
@@ -256,8 +272,7 @@ async function initCustomPortals() {
         list.textContent = '';
         if (data.customPortals.length === 0) {
             const emptyHint = document.createElement('span');
-            emptyHint.style.fontSize = "0.75rem";
-            emptyHint.style.color = "var(--text-dim)";
+            emptyHint.className = 'small-text text-dim';
             emptyHint.textContent = browser.i18n.getMessage("noCustomPortals") || "No custom portals added";
             list.appendChild(emptyHint);
             return;
@@ -395,7 +410,7 @@ async function checkEngine() {
                 const onAccess = document.getElementById('on-access-status');
                 if (onAccess) {
                     onAccess.textContent = response.on_access === "active" ? "Active" : "Standby";
-                    onAccess.style.color = response.on_access === "active" ? "var(--primary)" : "var(--text-dim)";
+                    setToneClass(onAccess, response.on_access === "active" ? 'primary' : 'dim');
                 }
             }
 
@@ -427,32 +442,32 @@ async function checkEngine() {
             const ertDot = document.getElementById('ert-dot');
 
             if (ertRow && response.ert_active !== undefined) {
-                ertRow.style.display = 'flex';
+                setVisible(ertRow, true, 'flex');
                 const ertIcon = document.getElementById('ert-icon');
 
                 if (response.ert_sealed) {
                     ertText.textContent = browser.i18n.getMessage("hardwareLocked") || "Hardware Locked";
-                    ertText.style.color = "var(--success)";
+                    setToneClass(ertText, 'success');
                     ertText.classList.add('ert-glow');
                     ertDot.className = "dot online";
-                    if (ertIcon) ertIcon.style.color = "var(--success)";
+                    if (ertIcon) setToneClass(ertIcon, 'success');
                 } else if (response.ert_active) {
                     ertText.textContent = browser.i18n.getMessage("softwareVault") || "Software Vault";
-                    ertText.style.color = "var(--primary)";
+                    setToneClass(ertText, 'primary');
                     ertText.classList.remove('ert-glow');
                     ertDot.className = "dot warning";
-                    if (ertIcon) ertIcon.style.color = "var(--primary)";
+                    if (ertIcon) setToneClass(ertIcon, 'primary');
                 } else {
                     ertText.textContent = browser.i18n.getMessage("unprotected") || "Unprotected";
-                    ertText.style.color = "var(--text-dim)";
+                    setToneClass(ertText, 'dim');
                     ertText.classList.remove('ert-glow');
                     ertDot.className = "dot offline";
-                    if (ertIcon) ertIcon.style.color = "var(--text-dim)";
+                    if (ertIcon) setToneClass(ertIcon, 'dim');
                 }
 
                 // Show manual refresh option if ERT is enabled
                 const ertResealRow = document.getElementById('ert-reseal-row');
-                if (ertResealRow) ertResealRow.style.display = response.ert_active ? 'flex' : 'none';
+                if (ertResealRow) setVisible(ertResealRow, !!response.ert_active, 'flex');
 
                 const ertResealBtn = document.getElementById('ert-reseal-btn');
                 if (ertResealBtn && !ertResealBtn.onclick) {
@@ -478,7 +493,7 @@ async function checkEngine() {
             // CRITICAL: Integrity Breach Handling
             if (isTampered) {
                 warning.textContent = ""; // Clear existing template
-                warning.style.display = "block";
+                setVisible(warning, true, 'block');
 
                 const title = document.createElement("strong");
                 title.textContent = response.integrity_ok === false ? "CRITICAL: Host Script Tampered!" : "ALERT: Extension Engine Changed!";
@@ -494,9 +509,7 @@ async function checkEngine() {
 
                 const authBtn = document.createElement("button");
                 authBtn.textContent = "Authorize & Reseal";
-                authBtn.className = "primary-btn";
-                authBtn.style.marginTop = "12px";
-                authBtn.style.width = "100%";
+                authBtn.className = "primary-btn mt-12 btn-block";
                 authBtn.onclick = async () => {
                     authBtn.disabled = true;
                     authBtn.textContent = "Sealing...";
@@ -528,7 +541,7 @@ async function checkEngine() {
                 // Handled in existing block above (line 375), preserving it
             } else if (!hasClamDB || dbDiffHours > 72 || !hasUrlIntel || !hasPhishIntel) {
                 warning.textContent = "";
-                warning.style.display = "block";
+                setVisible(warning, true, 'block');
 
                 const title = document.createElement("strong");
                 title.textContent = "PROTECTION WEAKENED";
@@ -547,9 +560,7 @@ async function checkEngine() {
 
                 const syncBtn = document.createElement("button");
                 syncBtn.textContent = "Update Intelligence Now";
-                syncBtn.className = "primary-btn";
-                syncBtn.style.marginTop = "12px";
-                syncBtn.style.width = "100%";
+                syncBtn.className = "primary-btn mt-12 btn-block";
                 syncBtn.onclick = async () => {
                     syncBtn.disabled = true;
                     syncBtn.textContent = "Syncing...";
@@ -563,12 +574,12 @@ async function checkEngine() {
                 const optCode = warning.querySelector('code');
                 if (optCode) {
                     optCode.textContent = response.optimize_cmd;
-                    warning.style.display = "block";
+                    setVisible(warning, true, 'block');
                 } else {
-                    warning.style.display = "none";
+                    setVisible(warning, false);
                 }
             } else {
-                warning.style.display = "none";
+                setVisible(warning, false);
             }
 
             btn.disabled = isTampered;
@@ -612,7 +623,7 @@ async function checkEngine() {
         badge.className = "protection-status status-danger";
 
         warning.textContent = "";
-        warning.style.display = "block";
+        setVisible(warning, true, 'block');
         const title = document.createElement("strong");
         title.textContent = "SECURITY ENGINE DISCONNECTED";
         warning.appendChild(title);
@@ -626,9 +637,7 @@ async function checkEngine() {
 
         const retryBtn = document.createElement("button");
         retryBtn.textContent = "Verify & Reconnect";
-        retryBtn.className = "primary-btn";
-        retryBtn.style.marginTop = "12px";
-        retryBtn.style.width = "100%";
+        retryBtn.className = "primary-btn mt-12 btn-block";
         retryBtn.onclick = async () => {
             retryBtn.disabled = true;
             const originalText = retryBtn.textContent;
@@ -638,7 +647,7 @@ async function checkEngine() {
                 const res = await browser.runtime.sendMessage({ action: "proxy_reconnect" });
                 if (res.status === "ok") {
                     // Success: Clear warning and re-check engine immediately
-                    warning.style.display = "none";
+                    setVisible(warning, false);
                     warning.textContent = "";
                     await checkEngine();
                 } else {
@@ -659,7 +668,7 @@ async function checkEngine() {
         isHealthy = false;
         dot.className = "dot offline";
         text.textContent = "Scanner Missing";
-        warning.style.display = "block";
+        setVisible(warning, true, 'block');
         badge.textContent = "Scanner Missing";
         badge.className = "protection-status status-danger";
     } else {
@@ -672,7 +681,7 @@ async function checkEngine() {
         } else if (isHealthy) {
             badge.textContent = "Protection Active";
             badge.className = "protection-status status-secured";
-            warning.style.display = "none";
+            setVisible(warning, false);
         } else {
             badge.textContent = "Warning / Weakened";
             badge.className = "protection-status status-warning";
@@ -692,15 +701,13 @@ async function renderBlockHistory() {
         // Limit to 5 most recent
         blocks.slice(-5).reverse().forEach(block => {
             const item = document.createElement('div');
-            item.className = 'log-item';
-            item.style.borderLeft = "3px solid #ef4444";
+            item.className = 'log-item log-item-threat';
 
             const info = document.createElement('div');
             info.className = 'log-info';
 
             const name = document.createElement('div');
-            name.className = 'log-name';
-            name.style.color = "#ef4444";
+            name.className = 'log-name text-danger';
             name.textContent = `${browser.i18n.getMessage("blockedLabel") || "Blocked"}: ${block.name}`;
 
             const meta = document.createElement('div');
@@ -717,7 +724,7 @@ async function renderBlockHistory() {
             item.appendChild(info);
 
             // Click to view forensics
-            item.style.cursor = 'pointer';
+            item.classList.add('clickable');
             item.addEventListener('click', () => {
                 showForensics(block);
             });
@@ -726,10 +733,7 @@ async function renderBlockHistory() {
         });
     } else {
         const empty = document.createElement('div');
-        empty.style.textAlign = "center";
-        empty.style.color = "var(--text-dim)";
-        empty.style.padding = "20px";
-        empty.style.fontSize = "0.85rem";
+        empty.className = 'empty-state';
         empty.textContent = browser.i18n.getMessage("cleanHistory") || "Clean history";
         container.appendChild(empty);
     }
@@ -782,10 +786,7 @@ async function renderLogs() {
         });
     } else {
         const empty = document.createElement('div');
-        empty.style.textAlign = "center";
-        empty.style.color = "var(--text-dim)";
-        empty.style.padding = "20px";
-        empty.style.fontSize = "0.85rem";
+        empty.className = 'empty-state';
         empty.textContent = browser.i18n.getMessage("noScans") || "No scans recorded";
         container.appendChild(empty);
     }
@@ -832,18 +833,18 @@ function showForensics(block) {
     }
 
     body.textContent = content;
-    overlay.style.display = 'flex';
+    setVisible(overlay, true, 'flex');
 
     if (block.reported) {
         reportBtn.textContent = "🔥 ALREADY BURNED";
         reportBtn.disabled = true;
-        reportBtn.style.color = "var(--success)";
-        reportBtn.style.borderColor = "var(--success)";
+        reportBtn.classList.remove('report-danger');
+        reportBtn.classList.add('report-success');
     } else {
         reportBtn.textContent = "🔥 Community Burn";
         reportBtn.disabled = false;
-        reportBtn.style.color = "var(--danger)";
-        reportBtn.style.borderColor = "var(--danger)";
+        reportBtn.classList.remove('report-success');
+        reportBtn.classList.add('report-danger');
     }
 
     // Store metadata for report
@@ -863,7 +864,7 @@ async function showAuditLogs() {
 
             title.textContent = "System EDR Audit Logs (alert_log.txt)";
             body.textContent = response.logs || "No logs found on disk.";
-            overlay.style.display = 'flex';
+            setVisible(overlay, true, 'flex');
         }
     } catch (e) {
         alert("Failed to retrieve system logs.");
@@ -927,8 +928,8 @@ async function communityBurn() {
 
         if (response.status === "ok") {
             btn.textContent = "🔥 COMMUNITY NEUTRALIZED";
-            btn.style.color = "var(--success)";
-            btn.style.borderColor = "var(--success)";
+            btn.classList.remove('report-danger');
+            btn.classList.add('report-success');
             btn.disabled = true;
 
             // Update storage

@@ -103,13 +103,77 @@ _whitelist_last_loaded = 0
 _thread_pool = ThreadPoolExecutor(max_workers=6)
 # Process pool: CPU-bound tasks (YARA scanning, hashing). Capped at 4 to protect
 # low-end hardware and avoid spawning more processes than logical cores.
-_process_pool = ProcessPoolExecutor(max_workers=min(os.cpu_count() or 2, 4))
+_process_pool_max_workers = min(os.cpu_count() or 2, 4)
+_process_pool = ProcessPoolExecutor(max_workers=_process_pool_max_workers)
+_process_pool_lock = threading.Lock()
+
+def _recreate_process_pool_locked(reason):
+    """Recreate process pool after a broken/shutdown state.
+
+    Must be called only while holding _process_pool_lock.
+    """
+    global _process_pool
+    try:
+        if _process_pool is not None:
+            _process_pool.shutdown(wait=False, cancel_futures=True)
+    except Exception as e:
+        log_debug(f"Process pool stale shutdown warning: {e}")
+
+    _process_pool = ProcessPoolExecutor(max_workers=_process_pool_max_workers)
+    log_debug(f"Process pool recreated: {reason}")
+    return _process_pool
+
+def _get_process_pool():
+    """Return a healthy process pool, recreating it on broken/shutdown state."""
+    global _process_pool
+    with _process_pool_lock:
+        if _process_pool is None:
+            return _recreate_process_pool_locked("pool uninitialized")
+
+        if getattr(_process_pool, "_shutdown_thread", False):
+            return _recreate_process_pool_locked("pool already shut down")
+
+        if getattr(_process_pool, "_broken", False):
+            return _recreate_process_pool_locked("pool marked broken")
+
+        return _process_pool
+
+def _scan_members_in_process_pool(all_files, context_label):
+    """Parallel-scan extracted members with timeout-safe cancellation and pool recovery."""
+    if not all_files:
+        return None
+
+    futures = []
+    try:
+        pool = _get_process_pool()
+        futures = [pool.submit(scan_file_basic, f) for f in all_files]
+        for future in futures:
+            try:
+                result = future.result(timeout=_GLOBAL_TIMEOUT)
+                if result.get("status") == "infected":
+                    return result
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                log_debug(f"Deep Scan Timeout in {context_label} member processing")
+            except concurrent.futures.BrokenExecutor as e:
+                log_debug(f"Process pool broke during {context_label} scan: {e}")
+                with _process_pool_lock:
+                    _recreate_process_pool_locked(f"broken during {context_label} scan")
+                break
+    finally:
+        for future in futures:
+            if not future.done():
+                future.cancel()
+
+    return None
 
 def _cleanup_pools():
     """Safely shutdown thread and process pools on exit."""
     try:
         _thread_pool.shutdown(wait=True, cancel_futures=True)
-        _process_pool.shutdown(wait=True, cancel_futures=True)
+        with _process_pool_lock:
+            if _process_pool is not None:
+                _process_pool.shutdown(wait=True, cancel_futures=True)
         log_debug("Process and thread pools shut down cleanly")
     except Exception as e:
         log_debug(f"Error shutting down pools: {e}")
@@ -121,6 +185,7 @@ atexit.register(_cleanup_pools)
 _MODULE_SNAPSHOTS = {}
 _CRITICAL_MODULES = ["clamav_engine.py", "tpm_provider.py", "yara_sanitizer.py", "ert_signer.py"]
 _secret_issued_lock = threading.Lock()  # Guards atomic check-and-set of _secret_issued
+_secret_issued = False
 
 # Global Background Task Status
 _BACKGROUND_TASKS_STATUS = {}
@@ -1049,13 +1114,21 @@ def check_malwarebazaar(filepath):
     except Exception as e:
         return {"status": "mb_error", "error": str(e)}
 
+def verify_hash_with_malwarebazaar(filepath):
+    """Backward-compatible wrapper kept for older call sites."""
+    return check_malwarebazaar(filepath)
+
 def verify_feed_integrity(data_path, checksum_url, algo='sha256'):
     """
     Fetch an out-of-band checksum and verify the downloaded file.
-    Supports MD5 and SHA-256.
+    SHA-256 only.
     """
     if not checksum_url:
         return True
+
+    if algo.lower() != 'sha256':
+        log_debug(f"INTEGRITY POLICY: refusing weak checksum algorithm '{algo}' for {os.path.basename(data_path)}")
+        return False
     
     tmp_sum = data_path + ".sum"
     try:
@@ -1064,7 +1137,7 @@ def verify_feed_integrity(data_path, checksum_url, algo='sha256'):
             with open(tmp_sum, "r") as f:
                 expected_data = f.read().strip().split()[0] # Handle "hash file" format
             
-            h = hashlib.md5() if algo == 'md5' else hashlib.sha256()
+            h = hashlib.sha256()
             with open(data_path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     h.update(chunk)
@@ -1113,15 +1186,15 @@ def update_intelligence(force=False):
             "name": "Maldet (LMD) MD5 Hashes",
             "url": "https://www.rfxn.com/downloads/rfxn.hdb",
             "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.hdb"),
-            "checksum_url": "https://www.rfxn.com/downloads/rfxn.hdb.md5",
-            "checksum_algo": "md5"
+            "checksum_url": "https://www.rfxn.com/downloads/rfxn.hdb.sha256",
+            "checksum_algo": "sha256"
         },
         {
             "name": "Maldet (LMD) Hex Patterns",
             "url": "https://www.rfxn.com/downloads/rfxn.ndb",
             "path": os.path.join(os.path.dirname(__file__), "signatures", "maldet.ndb"),
-            "checksum_url": "https://www.rfxn.com/downloads/rfxn.ndb.md5",
-            "checksum_algo": "md5"
+            "checksum_url": "https://www.rfxn.com/downloads/rfxn.ndb.sha256",
+            "checksum_algo": "sha256"
         }
     ]
     
@@ -1359,15 +1432,9 @@ def check_high_threat_container(filepath, deep_scan=False):
                             zf.extract(member, path=tmp_dir)
 
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
-                        futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
-                        for f in futures:
-                            try:
-                                res = f.result(timeout=_GLOBAL_TIMEOUT)
-                                if res.get("status") == "infected":
-                                    return True, _("Deep Parallel Scan: Infected file '{name}' found inside ZIP ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
-                            except concurrent.futures.TimeoutError:
-                                log_debug(f"Deep Scan Timeout in ZIP member processing")
-                                continue
+                        res = _scan_members_in_process_pool(all_files, "ZIP")
+                        if res:
+                            return True, _("Deep Parallel Scan: Infected file '{name}' found inside ZIP ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
             return False, None
             
         elif tarfile.is_tarfile(filepath):
@@ -1397,15 +1464,9 @@ def check_high_threat_container(filepath, deep_scan=False):
                             tf.extract(member, path=tmp_dir)
 
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
-                        futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
-                        for f in futures:
-                            try:
-                                res = f.result(timeout=_GLOBAL_TIMEOUT)
-                                if res.get("status") == "infected":
-                                    return True, _("Deep Parallel Scan: Infected file '{name}' found inside TAR ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
-                            except concurrent.futures.TimeoutError:
-                                log_debug(f"Deep Scan Timeout in TAR member processing")
-                                continue
+                        res = _scan_members_in_process_pool(all_files, "TAR")
+                        if res:
+                            return True, _("Deep Parallel Scan: Infected file '{name}' found inside TAR ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
             return False, None
 
     except Exception as e:
@@ -1439,15 +1500,9 @@ def check_high_threat_container(filepath, deep_scan=False):
                         if _BIN_7Z:
                             subprocess.run([_BIN_7Z, 'x', '-o' + tmp_dir, '--', filepath], capture_output=True, timeout=60)
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
-                        futures = [_process_pool.submit(scan_file_basic, f) for f in all_files]
-                        for f in futures:
-                            try:
-                                res = f.result(timeout=_GLOBAL_TIMEOUT)
-                                if res.get("status") == "infected":
-                                    return True, _("Deep Parallel Scan: Infected file '{name}' found via 7z ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
-                            except concurrent.futures.TimeoutError:
-                                log_debug(f"Deep Scan Timeout in 7z extraction processing")
-                                continue
+                        res = _scan_members_in_process_pool(all_files, "7z extraction")
+                        if res:
+                            return True, _("Deep Parallel Scan: Infected file '{name}' found via 7z ({virus})").format(name=os.path.basename(res["target"]), virus=res["virus"])
     except Exception as e:
         log_debug(f"Container Analysis Error: {e}")
     return False, None
@@ -2325,14 +2380,14 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
             if is_clam_infected:
                 # If already infected by heuristic/PUA, confirm
                 if "Heuristic" in virus_name or "PUA" in virus_name or "PUP" in virus_name:
-                    mb_result = verify_hash_with_malwarebazaar(actual_path) if not result.get("quarantined") else {"status": "quarantined_already"}
+                    mb_result = check_malwarebazaar(actual_path) if not result.get("quarantined") else {"status": "quarantined_already"}
                     result["mb"] = mb_result
                     if mb_result.get("status") == "mb_infected":
                         quarantine_file(actual_path)
                         result["quarantined"] = True
             else:
                 # ClamAV missed it, check MB for zero-day hash
-                mb_result = verify_hash_with_malwarebazaar(actual_path)
+                mb_result = check_malwarebazaar(actual_path)
                 result["mb"] = mb_result
                 if mb_result.get("status") == "mb_infected":
                     # MB caught it!
@@ -2390,6 +2445,11 @@ def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
             except Exception: pass
 
 def handle_message(message, secret, config, stored_hash, current_hash):
+    """Handle one native-messaging request with auth, tamper checks, and throttling.
+
+    This is a security-critical dispatcher: it validates session secrets,
+    enforces the circuit breaker, and routes actions to scanning/config paths.
+    """
     try:
         action = message.get("action")
         target = message.get("target")

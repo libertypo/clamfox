@@ -138,6 +138,8 @@ echo "🔐 Performing Vicious Baseline Seal..."
 SCRIPT_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$INSTALL_DIR/$HOST_NAME.py','rb').read()).hexdigest())")
 CLAM_PATH=$(command -v clamdscan || command -v clamscan)
 CLAM_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$CLAM_PATH','rb').read()).hexdigest())")
+ACTUAL_USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
+USER_GROUP=$(id -gn "$ACTUAL_USER")
 
 if [ -f "$DIR/config.json" ]; then
     cp "$DIR/config.json" "$INSTALL_DIR/"
@@ -162,9 +164,6 @@ fi
 
 # 5. Hardening Permissions
 echo "🔒 Hardening Filesystem Permissions..."
-ACTUAL_USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
-USER_GROUP=$(id -gn "$ACTUAL_USER")
-
 chown -R root:root "$INSTALL_DIR"
 chown -R "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/quarantine"
 chown -R "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/signatures"
@@ -266,29 +265,62 @@ PYEOF
 echo "   (YARA sync running in background — rules will be ready shortly)"
 
 # 9. Mandatory Access Control (AppArmor/SELinux)
-# ─────────────────────────────────────────────────────────────────────────────
-# ⚠️  SECURITY RISK NOTICE (Audit finding L-4):
-#   AppArmor has been intentionally disabled for cross-distro compatibility.
-#   Without a MAC profile, a compromised clamav_engine.py process has full
-#   user-level filesystem access.
-#
-#   This trade-off was accepted by the project maintainer.
-#   To re-enable AppArmor in a future release:
-#     1. Restore host/clamfox.apparmor to /etc/apparmor.d/opt.clamfox.clamav_host
-#     2. Run: apparmor_parser -r /etc/apparmor.d/opt.clamfox.clamav_host
-#     3. Remove this removal block.
-# ─────────────────────────────────────────────────────────────────────────────
-echo "🛡️  Clearing legacy Mandatory Access Control (MAC) policies..."
-APPARMOR_PROFILE="/etc/apparmor.d/opt.clamfox.clamav_engine.py"
-if [ -f "$APPARMOR_PROFILE" ]; then
-    echo "🗑️  Removing legacy AppArmor profile..."
-    rm -f "$APPARMOR_PROFILE"
-    if command -v apparmor_parser &> /dev/null; then
-        # Use -R to remove it from the kernel
-        apparmor_parser -R "$APPARMOR_PROFILE" 2>/dev/null || true
+MAC_MODE="${CLAMFOX_MAC_MODE:-auto}"  # auto|apparmor|selinux|disable
+APPARMOR_PROFILE_DST="/etc/apparmor.d/opt.clamfox.clamav_host"
+APPARMOR_PROFILE_SRC="$DIR/clamfox.apparmor"
+SELINUX_POLICY_SRC="$DIR/clamfox_host.cil"
+
+echo "🛡️  Configuring Mandatory Access Control (mode: $MAC_MODE)..."
+
+if [[ "$MAC_MODE" == "disable" ]]; then
+    echo "⚠️  MAC explicitly disabled by CLAMFOX_MAC_MODE=disable"
+elif [[ "$MAC_MODE" == "apparmor" ]] || { [[ "$MAC_MODE" == "auto" ]] && command -v apparmor_parser &> /dev/null && [ -f "$APPARMOR_PROFILE_SRC" ]; }; then
+    cp "$APPARMOR_PROFILE_SRC" "$APPARMOR_PROFILE_DST"
+    apparmor_parser -r "$APPARMOR_PROFILE_DST"
+    echo "✅ AppArmor profile loaded: $APPARMOR_PROFILE_DST"
+elif [[ "$MAC_MODE" == "selinux" ]] || { [[ "$MAC_MODE" == "auto" ]] && command -v selinuxenabled &> /dev/null && selinuxenabled; }; then
+    SELINUX_EXPLICIT=false
+    if [[ "$MAC_MODE" == "selinux" ]]; then
+        SELINUX_EXPLICIT=true
     fi
+
+    if ! command -v semodule &> /dev/null || [ ! -f "$SELINUX_POLICY_SRC" ]; then
+        if [[ "$SELINUX_EXPLICIT" == true ]]; then
+            echo "❌ SELinux mode requires semodule and policy file: $SELINUX_POLICY_SRC"
+            echo "   Install required SELinux tooling/policy or choose CLAMFOX_MAC_MODE=disable"
+            exit 1
+        fi
+        echo "⚠️  SELinux selected but semodule/module file unavailable; confinement may be limited."
+    else
+        if ! semodule -i "$SELINUX_POLICY_SRC"; then
+            if [[ "$SELINUX_EXPLICIT" == true ]]; then
+                echo "❌ Failed to load SELinux module from $SELINUX_POLICY_SRC in explicit selinux mode"
+                exit 1
+            fi
+            echo "⚠️  Failed to load SELinux module from $SELINUX_POLICY_SRC"
+        fi
+    fi
+
+    if command -v semanage &> /dev/null; then
+        semanage fcontext -a -t clamfox_host_exec_t "$INSTALL_DIR/clamav_host.py" 2>/dev/null || \
+        semanage fcontext -m -t clamfox_host_exec_t "$INSTALL_DIR/clamav_host.py" 2>/dev/null || true
+    fi
+
+    if command -v restorecon &> /dev/null; then
+        restorecon -v "$INSTALL_DIR/clamav_host.py" || true
+        restorecon -RF "$INSTALL_DIR" || true
+    fi
+
+    if command -v getenforce &> /dev/null; then
+        echo "✅ SELinux detected ($(getenforce)); attempted dedicated clamfox_host policy load."
+    else
+        echo "✅ SELinux mode selected; attempted dedicated clamfox_host policy load."
+    fi
+else
+    echo "❌ No supported MAC backend detected. Refusing unconfined install in mode: $MAC_MODE"
+    echo "   Install AppArmor or enable SELinux, or explicitly opt out with CLAMFOX_MAC_MODE=disable"
+    exit 1
 fi
-echo "✅ Native protection active (MAC bypassed for stability)."
 
 # 10. Final Summary
 echo "=================================================="
