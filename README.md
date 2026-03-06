@@ -8,18 +8,6 @@ ClamFox is designed around a native-host architecture.
 The Firefox extension provides browser-side shields.
 The ClamFox Native Bridge enables ClamAV scanning, file locking, and host-backed intelligence workflows.
 
-Privacy First
-
-ClamFox is designed with a privacy-first model and no data collection.
-
-100 percent local file scanning. Files are never uploaded. ClamAV runs on your CPU.
-Local threat cache. The full URLhaus blocklist is downloaded to your disk. Zero URLs are sent to external servers during browsing.
-Local-only history. Block history and scan logs stay in browser local storage and are never synced.
-Secure handshake. A machine-unique cryptographic secret is generated at install time so only your extension can talk to your scanner bridge.
-No accounts or tracking. No registration, analytics, telemetry, or user ID.
-Open source. Browser-to-host communication is visible in this repository.
-
-See PRIVACY_SUMMARY.txt for a full privacy architecture summary including known trade-offs.
 
 Requirements
 
