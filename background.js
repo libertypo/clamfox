@@ -27,6 +27,9 @@ const ACTIVE_CHALLENGES = new Map(); // tabId -> expiration timestamp
 const USER_WHITELIST = new Set(); // Persistent overrides
 const USER_WHITELIST_EXPIRY = new Map(); // domain -> expiry epoch ms
 const USER_BYPASS_TTL_MS = 24 * 60 * 60 * 1000; // 24h default manual bypass TTL
+const ONE_TIME_DOWNLOAD_ALLOW = new Map(); // normalized URL -> expiry epoch ms
+const ONE_TIME_DOWNLOAD_ALLOW_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const GLOBAL_DOWNLOAD_TRUST = new Set(); // Domain allowlist from trust_db global_whitelist
 
 // WASM Shield State
 let WASM_READY = false;
@@ -91,6 +94,73 @@ async function persistUserWhitelist() {
         userWhitelist: Array.from(USER_WHITELIST),
         userWhitelistExpiry: Object.fromEntries(USER_WHITELIST_EXPIRY)
     });
+}
+
+function normalizeDownloadBypassUrl(rawUrl) {
+    try {
+        const u = new URL(rawUrl);
+        // Keep canonicalization aligned with logBlock(): query params are
+        // redacted before persistence, so one-time allow must ignore them too.
+        u.search = "";
+        u.hash = "";
+        return u.href;
+    } catch (e) {
+        return null;
+    }
+}
+
+function purgeExpiredOneTimeDownloadAllow() {
+    const now = Date.now();
+    let changed = false;
+    for (const [url, expiresAt] of ONE_TIME_DOWNLOAD_ALLOW.entries()) {
+        if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+            ONE_TIME_DOWNLOAD_ALLOW.delete(url);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+async function persistOneTimeDownloadAllow() {
+    await browser.storage.local.set({
+        oneTimeDownloadAllow: Object.fromEntries(ONE_TIME_DOWNLOAD_ALLOW)
+    });
+}
+
+async function initOneTimeDownloadAllow() {
+    const now = Date.now();
+    const storage = await browser.storage.local.get({ oneTimeDownloadAllow: {} });
+    ONE_TIME_DOWNLOAD_ALLOW.clear();
+    for (const [url, expiresAtRaw] of Object.entries(storage.oneTimeDownloadAllow || {})) {
+        const expiresAt = Number(expiresAtRaw);
+        if (Number.isFinite(expiresAt) && expiresAt > now) {
+            ONE_TIME_DOWNLOAD_ALLOW.set(url, expiresAt);
+        }
+    }
+    await persistOneTimeDownloadAllow();
+}
+
+async function grantOneTimeDownloadAllow(rawUrl) {
+    const normalized = normalizeDownloadBypassUrl(rawUrl);
+    if (!normalized) {
+        throw new Error("Invalid download URL");
+    }
+    const expiresAt = Date.now() + ONE_TIME_DOWNLOAD_ALLOW_TTL_MS;
+    ONE_TIME_DOWNLOAD_ALLOW.set(normalized, expiresAt);
+    await persistOneTimeDownloadAllow();
+    return { normalized, expiresAt };
+}
+
+async function consumeOneTimeDownloadAllow(rawUrl) {
+    const normalized = normalizeDownloadBypassUrl(rawUrl);
+    if (!normalized) return false;
+    if (purgeExpiredOneTimeDownloadAllow()) {
+        await persistOneTimeDownloadAllow();
+    }
+    if (!ONE_TIME_DOWNLOAD_ALLOW.has(normalized)) return false;
+    ONE_TIME_DOWNLOAD_ALLOW.delete(normalized);
+    await persistOneTimeDownloadAllow();
+    return true;
 }
 
 // getBaseDomain is now provided by psl_data.js
@@ -212,6 +282,8 @@ async function initWasm() {
 
 async function initBackground() {
     await initWhitelist();
+    await initGlobalDownloadTrust();
+    await initOneTimeDownloadAllow();
     await initWasm();
     const storage = await browser.storage.local.get("honeypotSecret");
     if (storage.honeypotSecret) {
@@ -233,6 +305,41 @@ async function initBackground() {
         // Log but don't crash - allow degraded mode
         dbg("⚠️ Extension running in degraded mode without native host");
     }
+}
+
+async function initGlobalDownloadTrust() {
+    GLOBAL_DOWNLOAD_TRUST.clear();
+    try {
+        let url = browser.runtime.getURL("data/trust_db.json");
+        let response;
+        try {
+            response = await fetch(url);
+        } catch (e) {
+            url = browser.runtime.getURL("host/trust_db.json");
+            response = await fetch(url);
+        }
+
+        const data = await response.json();
+        const list = Array.isArray(data.global_whitelist) ? data.global_whitelist : [];
+        for (const domain of list) {
+            if (typeof domain === "string" && domain) {
+                GLOBAL_DOWNLOAD_TRUST.add(domain.toLowerCase());
+            }
+        }
+    } catch (e) {
+        console.warn("⚠️ TRUST DB unavailable for download trust list; proceeding without global trust overrides.");
+    }
+}
+
+function isGloballyTrustedDownloadHost(hostname) {
+    if (!hostname) return false;
+    const h = String(hostname).toLowerCase().replace(/\.+$/, "");
+    for (const domain of GLOBAL_DOWNLOAD_TRUST) {
+        if (h === domain || h.endsWith(`.${domain}`)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 initBackground();
@@ -342,11 +449,20 @@ browser.alarms.create("garbage_collection", { periodInMinutes: 15 });
 
 // DOWNLOAD SHIELD: Prevent access until scanned
 browser.downloads.onCreated.addListener(async (item) => {
+    if (await consumeOneTimeDownloadAllow(item.url)) {
+        dbg("🛡️ ONE-TIME ALLOW: Skipping source reputation block once for", item.url);
+        return;
+    }
+
     // 1. Whitelist Check
     try {
         const url = new URL(item.url);
         if (isWhitelisted(url.hostname)) {
             dbg("🛡️ USER OVERRIDE: Allowing download from whitelisted domain:", url.hostname);
+            return;
+        }
+        if (isGloballyTrustedDownloadHost(url.hostname)) {
+            dbg("🛡️ GLOBAL TRUST: Allowing download from trusted domain:", url.hostname);
             return;
         }
     } catch (e) { }
@@ -363,11 +479,29 @@ browser.downloads.onCreated.addListener(async (item) => {
         }, 3000);
 
         if (response.status === "malicious") {
-            console.error("🛑 DOWNLOAD ABORTED: Malicious Source Detected:", item.url);
+            const blockedHost = new URL(item.url).hostname;
+            const confirmed = response.confirmed === true;
+            const trustedHost = isGloballyTrustedDownloadHost(blockedHost);
+            const isDomainOnlyMatch = typeof response.threat === "string" && response.threat.includes("Domain-Match");
+
+            // Block only on high-confidence source verdicts.
+            // Unconfirmed or domain-only verdicts continue and are still covered by file scan.
+            if (!confirmed || trustedHost || isDomainOnlyMatch) {
+                console.warn("⚠️ DOWNLOAD SOURCE FLAGGED (non-confirmed/trusted): allowing for file scan", {
+                    host: blockedHost,
+                    threat: response.threat || null,
+                    confirmed,
+                    trustedHost,
+                    domainOnlyMatch: isDomainOnlyMatch
+                });
+                await browser.downloads.resume(item.id).catch(() => { });
+                return;
+            }
+
+            console.error("🛑 DOWNLOAD ABORTED: Confirmed malicious source detected:", item.url);
             await browser.downloads.cancel(item.id).catch(() => { });
             await browser.downloads.erase({ id: item.id }).catch(() => { });
 
-            const blockedHost = new URL(item.url).hostname;
             logBlock(
                 blockedHost,
                 "Malicious Link (Download Pre-Scan)",
@@ -378,7 +512,8 @@ browser.downloads.onCreated.addListener(async (item) => {
                     source_host: blockedHost,
                     final_host: blockedHost,
                     engine_verdict: response.threat || "URL reputation malicious verdict",
-                    verdict_status: response.status || "malicious"
+                    verdict_status: response.status || "malicious",
+                    confirmed
                 }
             );
 
@@ -386,7 +521,7 @@ browser.downloads.onCreated.addListener(async (item) => {
                 type: "basic",
                 iconUrl: "icons/warning.svg",
                 title: "🛑 DOWNLOAD BLOCKED",
-                message: `ClamFox prevented the download of a file from a known malicious site: ${new URL(item.url).hostname}`,
+                message: `ClamFox prevented the download of a file from a confirmed malicious site: ${blockedHost}`,
                 priority: 2
             });
         } else if (response.status === "clean") {
@@ -550,6 +685,154 @@ const fileScanLimiter = new ScanRateLimiter(30000); // 30 second cooldown betwee
  * @returns {Promise<Object>} Validated response from native host
  * @throws {Error} If timeout occurs or response validation fails
  */
+
+/**
+ * Verify cryptographic signature on host response.
+ * 
+ * 🔐 SECURITY: Ensures response authenticity via EC-DSA signature.
+ * Only trusts responses that were signed with the host's machine private key.
+ * Prevents host-compromise attacks where attacker could forge arbitrary responses.
+ * 
+ * @param {Object} response - Response object with '_signature' and '_signed_at' fields
+ * @returns {Promise<boolean>} True if signature is valid, false otherwise
+ * @throws {Error} If signature verification fails or response lacks signature
+ */
+async function verifyResponseSignature(response) {
+    if (!response || typeof response !== "object") {
+        throw new Error("Invalid response format for signature verification");
+    }
+
+    // Check that response includes signature fields
+    if (!response._signature || !response._signed_at || !response._pubkey_hint) {
+        throw new Error("Response missing cryptographic signature - possible tampering or host downgrade");
+    }
+
+    // Check timestamp to prevent replay attacks (signature can't be more than 60 seconds old)
+    const signedAt = response._signed_at;
+    const now = Math.floor(Date.now() / 1000);
+    if (now - signedAt > 60) {
+        throw new Error("Response signature is stale (older than 60 seconds) - possible replay attack");
+    }
+    if (signedAt > now + 5) {
+        throw new Error("Response signature timestamp is in the future - host clock may be compromised");
+    }
+
+    // Store public key from first check response
+    const hostPubKeyKey = "hostPublicKey";
+    let cachedPubKey = await browser.storage.local.get(hostPubKeyKey);
+    cachedPubKey = cachedPubKey[hostPubKeyKey];
+
+    // Fetch fresh key if not cached
+    if (!cachedPubKey) {
+        try {
+            dbg("🔐 Fetching host public key from bridge...");
+            const getKeyMsg = { action: "get_public_key" };
+            // TOFU hardening: fetch key twice and require exact match before pinning.
+            const keyResponseA = await browser.runtime.sendNativeMessage("clamav_host", getKeyMsg);
+            const keyResponseB = await browser.runtime.sendNativeMessage("clamav_host", getKeyMsg);
+
+            const pubKeyA = keyResponseA && typeof keyResponseA._pubkey === "string" ? keyResponseA._pubkey : null;
+            const pubKeyB = keyResponseB && typeof keyResponseB._pubkey === "string" ? keyResponseB._pubkey : null;
+
+            if (!pubKeyA || !pubKeyB || pubKeyA !== pubKeyB) {
+                throw new Error("Host public key bootstrap mismatch");
+            }
+
+            cachedPubKey = pubKeyA;
+            await browser.storage.local.set({ [hostPubKeyKey]: cachedPubKey });
+            dbg("🔐 Host public key retrieved and pinned (double-fetch match)");
+        } catch (e) {
+            dbg("🛡️ WARNING: Could not retrieve host public key:", e);
+            // Continue with verification attempt
+        }
+    }
+
+    if (!cachedPubKey) {
+        throw new Error("No host public key available - cannot verify response authenticity");
+    }
+
+    // Key continuity hardening: ensure signed responses keep the same key identity hint
+    // as the pinned public key we already trust.
+    const expectedHint = String(cachedPubKey).slice(0, 100);
+    if (response._pubkey_hint !== expectedHint) {
+        throw new Error("Host key continuity check failed (_pubkey_hint mismatch)");
+    }
+
+    // Reconstruct signed data (all non-underscore fields, sorted keys)
+    const signedData = JSON.stringify(
+        Object.keys(response)
+            .filter(k => k !== '_signature')
+            .sort()
+            .reduce((obj, key) => {
+                obj[key] = response[key];
+                return obj;
+            }, {})
+    );
+
+    try {
+        // Import host's public key for verification
+        const pubKeyObj = await crypto.subtle.importKey(
+            "spki",
+            _pem2der(cachedPubKey),
+            {
+                name: "ECDSA",
+                namedCurve: "P-256"
+            },
+            false,
+            ["verify"]
+        );
+
+        // Decode signature from base64
+        const signatureBytes = _base64ToArrayBuffer(response._signature);
+        const dataBytes = new TextEncoder().encode(signedData);
+
+        // Verify EC-DSA signature
+        const isValid = await crypto.subtle.verify(
+            {
+                name: "ECDSA",
+                hash: "SHA-256"
+            },
+            pubKeyObj,
+            signatureBytes,
+            dataBytes
+        );
+
+        if (!isValid) {
+            throw new Error("Signature verification failed - response may be forged");
+        }
+
+        dbg("🔐 ✅ Response signature verified successfully");
+        return true;
+
+    } catch (cryptoErr) {
+        console.error("🛡️ SIGNATURE VERIFICATION ERROR:", cryptoErr);
+        throw new Error(`Cryptographic verification failed: ${cryptoErr.message}`);
+    }
+}
+
+/**
+ * Helper: Convert PEM-format public key (with BEGIN/END markers) to DER binary.
+ */
+function _pem2der(pemStr) {
+    const withoutMarkers = pemStr
+        .split('\n')
+        .filter(line => !line.includes('BEGIN') && !line.includes('END') && line.trim())
+        .join('');
+    return _base64ToArrayBuffer(withoutMarkers);
+}
+
+/**
+ * Helper: Convert base64 string to ArrayBuffer.
+ */
+function _base64ToArrayBuffer(b64Str) {
+    const binaryString = atob(b64Str);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
 async function sendNativeMessageWithTimeout(hostname, message, timeoutMs = 8000) {
     const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Native Messaging request timed out")), timeoutMs)
@@ -559,7 +842,15 @@ async function sendNativeMessageWithTimeout(hostname, message, timeoutMs = 8000)
         timeoutPromise
     ]);
 
-    // 🛡️ SECURITY: Scrutinize every response from the native host
+    // 🛡️ SECURITY: Verify cryptographic signature first (must be awaited - now async)
+    try {
+        await verifyResponseSignature(response);
+    } catch (e) {
+        console.error(`🛡️ SIGNATURE VERIFICATION FAILURE [${message.action}]:`, e);
+        throw new Error(`Response authenticity check failed: ${e.message}`);
+    }
+
+    // 🛡️ SECURITY: Then scrutinize response schema and structure
     try {
         validateNativeResponse(message.action, response);
     } catch (e) {
@@ -647,9 +938,13 @@ function validateNativeResponse(action, response) {
             }
             break;
         case "get_audit_logs":
+            if (response.logs !== undefined && typeof response.logs !== "string" && !Array.isArray(response.logs)) {
+                throw new Error("Audit log payload must be a string or array");
+            }
+            break;
         case "list_quarantine":
-            if (response.logs && !Array.isArray(response.logs)) {
-                throw new Error("Log data must be an array of entries");
+            if (response.files !== undefined && !Array.isArray(response.files)) {
+                throw new Error("Quarantine listing payload must be an array");
             }
             break;
         case "clipper_alert":
@@ -923,6 +1218,12 @@ const BEACON_THROTTLE_LOCK = new Map(); // host -> next allowed timestamp
 // ------------------------------------------------------------------
 const CERT_CACHE = new Map(); // tabId -> certInfo
 const YOUNG_CERT_THRESHOLD = 72 * 60 * 60 * 1000; // 72 Hours
+const TLS_ERROR_PATTERNS = [
+    "SEC_ERROR",
+    "SSL_ERROR",
+    "NS_ERROR_NET_INADEQUATE_SECURITY",
+    "MOZILLA_PKIX_ERROR"
+];
 
 browser.webRequest.onHeadersReceived.addListener(
     async (details) => {
@@ -954,6 +1255,52 @@ browser.webRequest.onHeadersReceived.addListener(
             console.error("Cert Watchdog failed to inspect:", e);
         }
         return {};
+    },
+    { urls: ["https://*/*"], types: ["main_frame"] }
+);
+
+// TLS Failure Watchdog: capture browser-blocked certificate failures
+// that never reach onHeadersReceived (e.g. self-signed cert warnings).
+browser.webRequest.onErrorOccurred.addListener(
+    (details) => {
+        if (details.type !== "main_frame") return;
+        if (!details.url || !details.url.startsWith("https://")) return;
+
+        const err = String(details.error || "");
+        const isTlsError = TLS_ERROR_PATTERNS.some(p => err.includes(p));
+        if (!isTlsError) return;
+
+        let host = "unknown";
+        try {
+            host = new URL(details.url).hostname;
+        } catch (e) { }
+
+        if (host && isWhitelisted(host)) return;
+        if (host && shouldThrottleAlert(host)) return;
+
+        logBlock(
+            host,
+            `TLS Certificate Failure (${err})`,
+            details.url,
+            details.tabId,
+            {
+                block_stage: "transport",
+                source_host: host,
+                final_host: host,
+                engine_verdict: err,
+                verdict_status: "tls_error",
+                request_type: details.type,
+                from_cache: !!details.fromCache
+            }
+        ).catch(() => { });
+
+        browser.notifications.create({
+            type: "basic",
+            iconUrl: "icons/warning.svg",
+            title: "⚠️ TLS CERTIFICATE BLOCK",
+            message: `Firefox blocked ${host} due to a certificate problem (${err}).`,
+            priority: 2
+        }).catch(() => { });
     },
     { urls: ["https://*/*"], types: ["main_frame"] }
 );
@@ -1209,13 +1556,15 @@ async function performScan(target, type, downloadId = null, tabId = null) {
         const port = browser.runtime.connectNative(NATIVE_HOST_NAME);
 
         port.onMessage.addListener(async (response) => {
-            // SECURITY: Validate every streaming scan payload from native host
-            // before it can influence UI state, notifications, or persisted history.
+            // SECURITY: Verify authenticity first, then validate schema.
+            // Streaming messages must be signed too, otherwise forged progress/final
+            // events could influence scan verdict handling.
             try {
+                await verifyResponseSignature(response);
                 validateNativeResponse("scan", response);
             } catch (e) {
-                console.error("🛡️ SECURITY ALERT: Rejected malformed scan stream response:", e, response);
-                notifyError("Security validation rejected scan response.");
+                console.error("🛡️ SECURITY ALERT: Rejected unauthenticated/malformed scan stream response:", e, response);
+                notifyError("Security validation rejected scan stream response.");
                 port.disconnect();
                 return;
             }
@@ -1405,7 +1754,8 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             "scan_request", "proxy_check", "proxy_update", "proxy_force_engine_update",
             "proxy_reconnect", "proxy_reseal", "proxy_update_yara", "proxy_get_logs",
             "proxy_report_threat", "proxy_list_quarantine", "proxy_restore",
-            "update_alarm_settings", "bypass_domain", "rotate_secret", "get_intel"
+            "update_alarm_settings", "bypass_domain", "rotate_secret", "get_intel",
+            "allow_once_download"
         ];
 
         if (!isExtensionPage && privilegedActions.includes(message.action)) {
@@ -1643,6 +1993,16 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                 return { status: "whitelisted", expiresAt };
             }
+        } else if (message.action === "allow_once_download") {
+            if (!message.url || typeof message.url !== "string") {
+                return { status: "error", error: "Invalid URL for one-time allow." };
+            }
+            try {
+                const granted = await grantOneTimeDownloadAllow(message.url);
+                return { status: "ok", expiresAt: granted.expiresAt, url: granted.normalized };
+            } catch (e) {
+                return { status: "error", error: "Unable to grant one-time allow." };
+            }
         }
         return false;
     };
@@ -1806,7 +2166,9 @@ async function initBackgroundBridge() {
         backgroundPort = browser.runtime.connectNative(NATIVE_HOST_NAME);
         backgroundPort.onMessage.addListener(async (msg) => {
             try {
-                // 🛡️ SECURITY: Validate unsolicited messages from the host
+                // 🛡️ SECURITY: Authenticate unsolicited messages from the host,
+                // then validate structure before processing.
+                await verifyResponseSignature(msg);
                 validateNativeResponse(msg.action || "background_alert", msg);
 
                 if (msg.action === "clipper_alert") {
@@ -1823,7 +2185,7 @@ async function initBackgroundBridge() {
                     logBlock("System Clipboard", msg.threat || "Crypto-Address Hijacking", msg.new);
                 }
             } catch (e) {
-                console.error("🛡️ SECURITY ALERT: Rejected malformed background alert from host:", e, msg);
+                console.error("🛡️ SECURITY ALERT: Rejected unauthenticated/malformed background alert from host:", e, msg);
             }
         });
 

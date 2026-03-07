@@ -448,31 +448,41 @@ function deployDriveByDownloadShield() {
     const script = document.createElement('script');
     script.textContent = `
         (function() {
-            // Hook programmatic anchor clicks
+            // Hook programmatic anchor clicks - only block actual malicious executables
             const origClick = HTMLAnchorElement.prototype.click;
             HTMLAnchorElement.prototype.click = function() {
-                // If it has a download attribute or seems to point to an executable/archive
-                const isSuspectFile = this.href && this.href.match(/\\.(exe|scr|msi|vbs|bat|cmd|js|ps1|zip|rar|7z|iso|img)$/i);
+                // Only flag EXECUTABLE files from untrusted sources
+                // Allow everything else (PDFs, .zip, etc. are commonly downloaded)
+                const isMaliciousExecutable = this.href && this.href.match(/\\.(?:exe|scr|msi|vbs|bat|cmd|com|pif)$/i);
                 
-                if (this.hasAttribute('download') || isSuspectFile) {
+                // Check if this is from a trusted site
+                const hostname = window.location.hostname.toLowerCase();
+                const trustedDomains = ['google.com', 'microsoft.com', 'apple.com', 'amazon.com', 'github.com', 'firefox.com', 'mozilla.org'];
+                const isTrustedSite = trustedDomains.some(d => hostname === d || hostname.endsWith('.' + d));
+                
+                if (isMaliciousExecutable && !isTrustedSite) {
                     document.dispatchEvent(new CustomEvent('${SYS_SECRET_TOKEN}', { detail: { 
                         __sys_driveby_threat: true, 
-                        threat: 'Programmatic hidden download initiated: ' + (this.href || 'Blob') 
+                        threat: 'Suspicious executable download detected: ' + (this.href || 'Blob') 
                     }}));
                 }
                 return origClick.apply(this, arguments);
             };
             HTMLAnchorElement.prototype.click.toString = function() { return "function click() { [native code] }"; };
 
-            // Hook programmatic window.open which are often used for pop-under downloads
+            // Hook programmatic window.open - only flag with executable file extensions
             const origWindowOpen = window.open;
             window.open = function(url, target, features) {
                 if (url && typeof url === 'string') {
-                    const isSuspectFile = url.match(/\\.(exe|scr|msi|vbs|bat|cmd|js|ps1|zip|rar|7z|iso|img)$/i);
-                    if (isSuspectFile) {
+                    const isMaliciousExecutable = url.match(/\\.(?:exe|scr|msi|vbs|bat|cmd|com|pif)$/i);
+                    const hostname = window.location.hostname.toLowerCase();
+                    const trustedDomains = ['google.com', 'microsoft.com', 'apple.com', 'amazon.com', 'github.com', 'firefox.com', 'mozilla.org'];
+                    const isTrustedSite = trustedDomains.some(d => hostname === d || hostname.endsWith('.' + d));
+                    
+                    if (isMaliciousExecutable && !isTrustedSite) {
                         document.dispatchEvent(new CustomEvent('${SYS_SECRET_TOKEN}', { detail: { 
                             __sys_driveby_threat: true, 
-                            threat: 'Programmatic window.open download initiated: ' + url
+                            threat: 'Suspicious executable via window.open: ' + url
                         }}));
                     }
                 }
@@ -489,7 +499,7 @@ function deployDriveByDownloadShield() {
             console.warn("🛡️ DRIVE-BY DOWNLOAD SHIELD: ", event.detail.threat);
             if (!window._sysDriveByAlerted) {
                 window._sysDriveByAlerted = true;
-                showWarningToast("🛑 AUTOMATED DOWNLOAD", "A script tried to download a file without your permission.");
+                showWarningToast("🛑 AUTOMATED DOWNLOAD", "A script tried to download an executable file without your permission.");
                 browser.runtime.sendMessage({
                     action: "log_driveby",
                     threat: "Drive-by Download Detection: " + event.detail.threat

@@ -24,54 +24,91 @@ echo "=================================================="
 echo "🔍 Verifying System Dependencies..."
 MISSING_DEPS=()
 
-# Map commands to package names
-declare -A pkg_map
-pkg_map=( 
-    ["clamscan"]="clamav clamav-daemon" 
-    ["curl"]="curl" 
-    ["file"]="file" 
-    ["7z"]="p7zip-full" 
-    ["gettext"]="gettext" 
-    ["tpm2_getcap"]="tpm2-tools"
-    ["python3"]="python3-requests" # Ensure requests for YARA sync
-)
+# Detect package manager once so install paths and later zip bootstrap are consistent.
+PKG_INSTALL_CMD=()
+PKG_UPDATE_CMD=()
+CLAM_PKG="clamav"
+CLAM_DAEMON_PKG=""
+PY_REQUESTS_PKG="python3-requests"
+PY_CRYPTO_PKG="python3-cryptography"
+P7ZIP_PKG="p7zip-full"
 
-for cmd in "${!pkg_map[@]}"; do
-    if ! command -v $cmd &> /dev/null; then
-        echo "🚩 Missing: $cmd"
-        MISSING_DEPS+=("${pkg_map[$cmd]}")
-    fi
-done
+if command -v apt-get &> /dev/null; then
+    PKG_INSTALL_CMD=(apt-get install -y)
+    PKG_UPDATE_CMD=(apt-get update)
+    CLAM_DAEMON_PKG="clamav-daemon"
+elif command -v dnf &> /dev/null; then
+    PKG_INSTALL_CMD=(dnf install -y)
+    P7ZIP_PKG="p7zip"
+elif command -v pacman &> /dev/null; then
+    PKG_INSTALL_CMD=(pacman -S --noconfirm)
+    PY_REQUESTS_PKG="python-requests"
+    PY_CRYPTO_PKG="python-cryptography"
+    P7ZIP_PKG="p7zip"
+else
+    echo "⚠️  Unknown package manager. Please install dependencies manually."
+    exit 1
+fi
 
-# Special check for requests library if python3 itself exists
+add_dep() {
+    local dep="$1"
+    [ -n "$dep" ] || return 0
+    for existing in "${MISSING_DEPS[@]}"; do
+        [ "$existing" = "$dep" ] && return 0
+    done
+    MISSING_DEPS+=("$dep")
+}
+
+# Command-to-package checks
+if ! command -v clamscan &> /dev/null; then
+    echo "🚩 Missing: clamscan"
+    add_dep "$CLAM_PKG"
+    add_dep "$CLAM_DAEMON_PKG"
+fi
+if ! command -v curl &> /dev/null; then
+    echo "🚩 Missing: curl"
+    add_dep "curl"
+fi
+if ! command -v file &> /dev/null; then
+    echo "🚩 Missing: file"
+    add_dep "file"
+fi
+if ! command -v 7z &> /dev/null; then
+    echo "🚩 Missing: 7z"
+    add_dep "$P7ZIP_PKG"
+fi
+if ! command -v gettext &> /dev/null; then
+    echo "🚩 Missing: gettext"
+    add_dep "gettext"
+fi
+if ! command -v tpm2_getcap &> /dev/null; then
+    echo "🚩 Missing: tpm2_getcap"
+    add_dep "tpm2-tools"
+fi
+if ! command -v python3 &> /dev/null; then
+    echo "🚩 Missing: python3"
+    add_dep "python3"
+fi
+
+# Python runtime module checks (system-packages only; no pip/venv behavior differences)
 if command -v python3 &> /dev/null; then
     if ! python3 -c "import requests" &> /dev/null; then
-        echo "🚩 Missing: python3-requests"
-        MISSING_DEPS+=("python3-requests")
+        echo "🚩 Missing Python module: requests"
+        add_dep "$PY_REQUESTS_PKG"
+    fi
+    if ! python3 -c "import cryptography" &> /dev/null; then
+        echo "🚩 Missing Python module: cryptography"
+        add_dep "$PY_CRYPTO_PKG"
     fi
 fi
 
 if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
     echo "📦 The following dependencies are missing: ${MISSING_DEPS[*]}"
-    
-    # Detect Package Manager
-    if command -v apt-get &> /dev/null; then
-        PKG_MANAGER="apt-get install -y"
-        update_cmd="apt-get update"
-    elif command -v dnf &> /dev/null; then
-        PKG_MANAGER="dnf install -y"
-        update_cmd=""
-    elif command -v pacman &> /dev/null; then
-        PKG_MANAGER="pacman -S --noconfirm"
-        update_cmd=""
-    else
-        echo "⚠️  Unknown package manager. Please install dependencies manually: ${MISSING_DEPS[*]}"
-        exit 1
+    echo "⚙️  Automatically installing missing dependencies using ${PKG_INSTALL_CMD[*]}..."
+    if [[ ${#PKG_UPDATE_CMD[@]} -gt 0 ]]; then
+        "${PKG_UPDATE_CMD[@]}"
     fi
-
-    echo "⚙️  Automatically installing missing dependencies using $PKG_MANAGER..."
-    if [[ -n "$update_cmd" ]]; then $update_cmd; fi
-    $PKG_MANAGER "${MISSING_DEPS[@]}"
+    "${PKG_INSTALL_CMD[@]}" "${MISSING_DEPS[@]}"
 else
     echo "✅ All dependencies present."
 fi
@@ -95,6 +132,12 @@ cp "$DIR/clamav_engine.py" "$INSTALL_DIR/$HOST_NAME.py"
 cp "$DIR/yara_sanitizer.py" "$INSTALL_DIR/"
 cp "$DIR/tpm_provider.py" "$INSTALL_DIR/"
 cp "$DIR/ert_signer.py" "$INSTALL_DIR/"
+# Ensure host runtime has trust DB even when installed outside the repo tree.
+if [ -f "$DIR/trust_db.json" ]; then
+    cp "$DIR/trust_db.json" "$INSTALL_DIR/trust_db.json"
+elif [ -f "$DIR/../data/trust_db.json" ]; then
+    cp "$DIR/../data/trust_db.json" "$INSTALL_DIR/trust_db.json"
+fi
 if [ -d "$DIR/locales" ]; then
     cp -r "$DIR/locales/"* "$INSTALL_DIR/locales/"
 fi
@@ -173,6 +216,7 @@ chmod 755 "$INSTALL_DIR/ert_signer.py"
 chmod 755 "$INSTALL_DIR/tpm_provider.py"
 chown "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/config.json"
 chmod 600 "$INSTALL_DIR/config.json"
+chmod 644 "$INSTALL_DIR/trust_db.json" 2>/dev/null || true
 chmod 700 "$INSTALL_DIR/quarantine" 
 chmod 755 "$INSTALL_DIR/signatures"
 chmod 644 "$INSTALL_DIR/urldb.txt" 2>/dev/null || touch "$INSTALL_DIR/urldb.txt" && chmod 644 "$INSTALL_DIR/urldb.txt"
@@ -216,7 +260,7 @@ echo "📦 Packaging and Sideloading Extension (Non-Forced)..."
 echo "   (Using 'normal_installed' mode to allow user control while ensuring availability)"
 
 if ! command -v zip &> /dev/null; then
-    $PKG_MANAGER zip
+    "${PKG_INSTALL_CMD[@]}" zip
 fi
 
 PARENT_DIR="$(cd "$DIR/.." && pwd)"

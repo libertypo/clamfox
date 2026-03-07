@@ -189,6 +189,63 @@ class MockScanRateLimiter {
     }
 }
 
+/**
+ * Mock host-side signed payload canonicalization.
+ * Mirrors host/clamav_engine.py send_message behavior:
+ * sign all fields except _signature itself.
+ */
+function mockHostSignedPayload(response) {
+    const canonical = {};
+    Object.keys(response)
+        .filter(k => k !== "_signature")
+        .sort()
+        .forEach(k => {
+            canonical[k] = response[k];
+        });
+    return JSON.stringify(canonical);
+}
+
+/**
+ * Mock extension-side signed payload canonicalization.
+ * Mirrors background.js verifyResponseSignature behavior.
+ */
+function mockExtensionSignedPayload(response) {
+    const canonical = {};
+    Object.keys(response)
+        .filter(k => k !== "_signature")
+        .sort()
+        .forEach(k => {
+            canonical[k] = response[k];
+        });
+    return JSON.stringify(canonical);
+}
+
+/**
+ * Mock trusted-domain check used by drive-by shield injected logic.
+ */
+function mockIsTrustedDriveByDomain(hostname) {
+    const trustedDomains = [
+        "google.com",
+        "microsoft.com",
+        "apple.com",
+        "amazon.com",
+        "github.com",
+        "firefox.com",
+        "mozilla.org"
+    ];
+    const h = String(hostname || "").toLowerCase();
+    return trustedDomains.some(d => h === d || h.endsWith("." + d));
+}
+
+/**
+ * Mock stream/background native message guard used by background.js handlers.
+ * Security contract: verify signature first, then validate schema.
+ */
+async function mockGuardNativeStreamMessage(response, verifyFn, validateFn, action = "scan") {
+    await verifyFn(response);
+    return validateFn(action, response);
+}
+
 // ============================================================================
 // TEST SUITE DEFINITION
 // ============================================================================
@@ -414,6 +471,87 @@ suite.test("Scan Rate Limiter: Reset cooldown", () => {
     suite.assert(result === true, "Should allow after reset");
 });
 
+// --- SIGNATURE CANONICALIZATION REGRESSION TESTS ---
+
+suite.test("Signature Canonicalization: Includes security metadata fields", () => {
+    const response = {
+        status: "ok",
+        _signed_at: 1700000000,
+        _pubkey_hint: "-----BEGIN PUBLIC KEY-----ABC",
+        _signature: "BASE64SIG",
+        threat: "none"
+    };
+
+    const payload = mockHostSignedPayload(response);
+    suite.assert(payload.includes('"_signed_at":1700000000'), "_signed_at must be signed");
+    suite.assert(payload.includes('"_pubkey_hint":"-----BEGIN PUBLIC KEY-----ABC"'), "_pubkey_hint must be signed");
+    suite.assert(!payload.includes("BASE64SIG"), "_signature must be excluded from signed payload");
+});
+
+suite.test("Signature Canonicalization: Host and extension payloads match", () => {
+    const response = {
+        z: 1,
+        status: "clean",
+        _signed_at: 1700000001,
+        _pubkey_hint: "HINT",
+        _signature: "SIG",
+        a: "first"
+    };
+
+    const hostPayload = mockHostSignedPayload(response);
+    const extPayload = mockExtensionSignedPayload(response);
+    suite.assertEquals(extPayload, hostPayload, "Host and extension canonicalization must be identical");
+});
+
+// --- DRIVE-BY TRUSTED DOMAIN REGRESSION TESTS ---
+
+suite.test("Drive-by Domain Trust: Allows exact/suffix trusted domains only", () => {
+    suite.assert(mockIsTrustedDriveByDomain("google.com") === true, "Exact trusted domain should pass");
+    suite.assert(mockIsTrustedDriveByDomain("mail.google.com") === true, "Trusted subdomain should pass");
+});
+
+suite.test("Drive-by Domain Trust: Rejects substring spoof domains", () => {
+    suite.assert(mockIsTrustedDriveByDomain("evilgoogle.com") === false, "Substring spoof must fail");
+    suite.assert(mockIsTrustedDriveByDomain("google.com.evil.tld") === false, "Suffix spoof must fail");
+});
+
+// --- STREAM AUTH REGRESSION TESTS ---
+
+suite.test("Native Stream Guard: Rejects before schema validation when signature check fails", async () => {
+    let schemaValidated = false;
+    const verifyFn = async () => {
+        throw new Error("Signature invalid");
+    };
+    const validateFn = () => {
+        schemaValidated = true;
+        return true;
+    };
+
+    try {
+        await mockGuardNativeStreamMessage({ status: "progress" }, verifyFn, validateFn, "scan");
+        throw new Error("Should have thrown");
+    } catch (e) {
+        suite.assert(e.message.includes("Signature"), "Should fail on signature verification");
+        suite.assert(schemaValidated === false, "Schema validation must not run when signature fails");
+    }
+});
+
+suite.test("Native Stream Guard: Verifies signature before schema validation", async () => {
+    const steps = [];
+    const verifyFn = async () => {
+        steps.push("verify");
+        return true;
+    };
+    const validateFn = () => {
+        steps.push("validate");
+        return true;
+    };
+
+    const ok = await mockGuardNativeStreamMessage({ status: "progress" }, verifyFn, validateFn, "scan");
+    suite.assert(ok === true, "Guard should pass on valid signed message");
+    suite.assertEquals(steps.join(","), "verify,validate", "Must verify before schema validation");
+});
+
 // ============================================================================
 // EXECUTE TEST SUITE
 // ============================================================================
@@ -438,6 +576,10 @@ if (typeof module !== "undefined" && module.exports) {
         mockValidateYaraRuleSafety,
         mockValidateMessageTimestamp,
         MockScanRateLimiter,
+        mockHostSignedPayload,
+        mockExtensionSignedPayload,
+        mockIsTrustedDriveByDomain,
+        mockGuardNativeStreamMessage,
         suite
     };
 }

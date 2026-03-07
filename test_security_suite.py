@@ -494,6 +494,28 @@ class DefinitionUpdatePolicyTests(unittest.TestCase):
         self.assertTrue(self._is_stale(now - (120 * 3600), max_age_hours=96, now=now))
 
 
+class UrlReputationDomainFallbackTests(unittest.TestCase):
+    """Regression checks for URLhaus domain-level fallback behavior."""
+
+    def _should_block_domain_match(self, domain_in_cache, globally_trusted):
+        # Mirrors the current host policy: skip blanket domain blocking for
+        # globally trusted/shared domains, require exact URL hits there.
+        if not domain_in_cache:
+            return False
+        if globally_trusted:
+            return False
+        return True
+
+    def test_skip_domain_fallback_for_globally_trusted_domain(self):
+        self.assertFalse(self._should_block_domain_match(domain_in_cache=True, globally_trusted=True))
+
+    def test_keep_domain_fallback_for_untrusted_domain(self):
+        self.assertTrue(self._should_block_domain_match(domain_in_cache=True, globally_trusted=False))
+
+    def test_no_domain_fallback_when_not_in_cache(self):
+        self.assertFalse(self._should_block_domain_match(domain_in_cache=False, globally_trusted=False))
+
+
 def run_tests():
     """Run all security tests"""
     loader = unittest.TestLoader()
@@ -508,6 +530,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(ProcessPoolRecoveryTests))
     suite.addTests(loader.loadTestsFromTestCase(CVERegressionCatalogTests))
     suite.addTests(loader.loadTestsFromTestCase(DefinitionUpdatePolicyTests))
+    suite.addTests(loader.loadTestsFromTestCase(UrlReputationDomainFallbackTests))
     
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

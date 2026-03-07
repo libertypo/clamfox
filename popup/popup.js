@@ -758,6 +758,35 @@ async function renderBlockHistory() {
             info.appendChild(hosts);
             info.appendChild(verdict);
             info.appendChild(details);
+
+            const inferredSourceStage = block.block_stage === 'source' ||
+                (!block.block_stage && typeof block.reason === 'string' && block.reason.includes('Download Pre-Scan'));
+
+            if (inferredSourceStage && typeof block.url === 'string' && block.url) {
+                const allowBtn = document.createElement('button');
+                allowBtn.className = 'mini-btn allow-once-btn';
+                allowBtn.textContent = 'Allow once (10m)';
+                allowBtn.addEventListener('click', async (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    allowBtn.disabled = true;
+                    const original = allowBtn.textContent;
+                    allowBtn.textContent = 'Granting...';
+                    try {
+                        const res = await browser.runtime.sendMessage({ action: 'allow_once_download', url: block.url });
+                        if (res && res.status === 'ok') {
+                            allowBtn.textContent = 'Allowed once';
+                        } else {
+                            allowBtn.disabled = false;
+                            allowBtn.textContent = original;
+                        }
+                    } catch (e) {
+                        allowBtn.disabled = false;
+                        allowBtn.textContent = original;
+                    }
+                });
+                info.appendChild(allowBtn);
+            }
             item.appendChild(info);
 
             // Click to view forensics
@@ -856,6 +885,7 @@ function showForensics(block) {
     const body = document.getElementById('forensic-body');
     const title = document.getElementById('forensic-title');
     const reportBtn = document.getElementById('report-threat-btn');
+    const actions = document.getElementById('forensic-actions');
 
     title.textContent = `Forensic Audit: ${block.hostname || 'Unknown'}`;
 
@@ -889,6 +919,40 @@ function showForensics(block) {
     reportBtn.dataset.reason = block.reason;
     reportBtn.dataset.time = block.time;
     reportBtn.dataset.forensics = JSON.stringify(block.forensics || {});
+
+    // Ensure a one-time allow action is visible in forensic view for source-stage blocks.
+    const existingAllowBtn = document.getElementById('allow-once-forensic-btn');
+    if (existingAllowBtn) {
+        existingAllowBtn.remove();
+    }
+
+    const inferredSourceStage = block.block_stage === 'source' ||
+        (!block.block_stage && typeof block.reason === 'string' && (block.reason.includes('Download Pre-Scan') || block.reason.includes('Malicious Link')));
+
+    if (actions && inferredSourceStage && typeof block.url === 'string' && block.url) {
+        const allowBtn = document.createElement('button');
+        allowBtn.id = 'allow-once-forensic-btn';
+        allowBtn.className = 'mini-btn allow-once-btn';
+        allowBtn.textContent = 'Allow once (10m)';
+        allowBtn.addEventListener('click', async () => {
+            const original = allowBtn.textContent;
+            allowBtn.disabled = true;
+            allowBtn.textContent = 'Granting...';
+            try {
+                const res = await browser.runtime.sendMessage({ action: 'allow_once_download', url: block.url });
+                if (res && res.status === 'ok') {
+                    allowBtn.textContent = 'Allowed once';
+                } else {
+                    allowBtn.disabled = false;
+                    allowBtn.textContent = original;
+                }
+            } catch (e) {
+                allowBtn.disabled = false;
+                allowBtn.textContent = original;
+            }
+        });
+        actions.appendChild(allowBtn);
+    }
 }
 
 async function showAuditLogs() {

@@ -1,5 +1,17 @@
 # Script to package the extension
-VERSION="0.0.6.5"
+VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -n1)
+AMO_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' manifest_amo.json | head -n1)
+
+if [ -z "$VERSION" ] || [ -z "$AMO_VERSION" ]; then
+    echo "ERROR: Failed to parse version from manifest.json or manifest_amo.json."
+    exit 1
+fi
+
+if [ "$VERSION" != "$AMO_VERSION" ]; then
+    echo "ERROR: Version mismatch between manifest.json ($VERSION) and manifest_amo.json ($AMO_VERSION)."
+    exit 1
+fi
+
 FULL_PACKAGE="clamfox_full_${VERSION}.zip"
 AMO_SOURCE="clamfox_amo_source_${VERSION}.zip"
 XPI_FULL="clamfox_full_${VERSION}.xpi"
@@ -40,7 +52,13 @@ if [ -f "$WASM_FILE" ]; then
     echo "🛡️  Injecting WASM Integrity Hash: $WASM_HASH"
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_full/background.js
 else
-    echo "⚠️  WASM binary not found. Integrity check will stay as placeholder."
+    echo "ERROR: WASM binary not found. Refusing to package with unresolved integrity placeholder."
+    exit 1
+fi
+
+if grep -q "PLACEHOLDER_WASM_HASH" build_full/background.js; then
+    echo "ERROR: WASM integrity hash injection failed in FULL package!"
+    exit 1
 fi
 
 # Privacy: Remove local state/secrets from host before packaging
@@ -67,6 +85,10 @@ fi
 if [ -f "../$WASM_FILE" ]; then
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" background.js
 fi
+if grep -q "PLACEHOLDER_WASM_HASH" background.js; then
+    echo "ERROR: WASM integrity hash injection failed in STANDALONE package!"
+    exit 1
+fi
 zip -r "../$XPI_STANDALONE" ./* && cd ..
 
 # 3. Create Full XPI (Includes Native Host)
@@ -88,6 +110,10 @@ fi
 if [ -f "$WASM_FILE" ]; then
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_xpi_full/background.js
 fi
+if grep -q "PLACEHOLDER_WASM_HASH" build_xpi_full/background.js; then
+    echo "ERROR: WASM integrity hash injection failed in FULL XPI!"
+    exit 1
+fi
 mkdir -p build_xpi_full/META-INF
 cd build_xpi_full && zip -r "../$XPI_FULL" ./* && cd ..
 
@@ -108,6 +134,10 @@ if grep -q "PLACEHOLDER_CANARY" build_amo/background.js; then
 fi
 if [ -f "$WASM_FILE" ]; then
     sed -i "s/PLACEHOLDER_WASM_HASH/$WASM_HASH/g" build_amo/background.js
+fi
+if grep -q "PLACEHOLDER_WASM_HASH" build_amo/background.js; then
+    echo "ERROR: WASM integrity hash injection failed in AMO source!"
+    exit 1
 fi
 cd build_amo && zip -r "../$AMO_SOURCE" ./* && cd ..
 

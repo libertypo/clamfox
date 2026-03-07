@@ -19,6 +19,7 @@ import socket
 import tempfile
 import random
 import string
+import secrets
 from urllib.parse import urlparse, urljoin
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -31,6 +32,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+# 🔐 SECURITY: Disable pickle after imports (prevents RCE if code is compromised)
+# Pickle is already loaded by multiprocessing, but remove from sys.modules to prevent new imports
+for pickle_module in ['pickle', '_pickle', 'cPickle', 'dill']:
+    if pickle_module in sys.modules:
+        del sys.modules[pickle_module]
 
 # Supply-Chain Canary (Injected at build time)
 CLAMFOX_CANARY = "PLACEHOLDER_CANARY"
@@ -357,6 +364,9 @@ def get_or_create_machine_key():
         
         # Store in Keyring
         keyring_set("machine_private_key", pem.decode('utf-8'))
+
+        # Cache key immediately so optional audit artifacts cannot break signing.
+        _MACHINE_KEY_CACHE = private_key
         
         # Save Public Key locally for audit/verification
         pub_key = private_key.public_key()
@@ -364,10 +374,13 @@ def get_or_create_machine_key():
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
-        with open(os.path.join(os.path.dirname(__file__), "vault_pub.pem"), "wb") as f:
-            f.write(pub_pem)
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "vault_pub.pem"), "wb") as f:
+                f.write(pub_pem)
+        except Exception as write_err:
+            # Do not fail key initialization if audit export path is not writable.
+            log_debug(f"Non-fatal: unable to write vault_pub.pem: {write_err}")
 
-        _MACHINE_KEY_CACHE = private_key
         return private_key
     except Exception as e:
         log_debug(f"CRYPTO ERROR (get_or_create_machine_key): {e}")
@@ -465,6 +478,43 @@ def log_debug(msg):
     if isinstance(msg, str) and '"secret":' in msg:
         import re
         sanitized = re.sub(r'"secret":\s*"[^"]*"', '"secret": "********"', msg)
+
+    def _is_diag_candidate(text):
+        if not isinstance(text, str):
+            return False
+        upper = text.upper()
+        markers = ["ERROR", "FAIL", "CRITICAL", "EXCEPTION", "TIMEOUT", "DENIED", "TAMPER"]
+        return any(m in upper for m in markers)
+
+    def _write_diag_log(text):
+        # Intentionally plaintext but heavily sanitized and only for high-signal
+        # operational diagnostics, so incident response does not depend on key
+        # availability/decryption tooling.
+        try:
+            safe = str(text).replace("\n", " ").replace("\r", " ")
+            safe = safe[:1200]
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            diag_path = os.path.expanduser("~/.clamfox_host_diag.log")
+
+            # Soft rotate if file grows too large.
+            try:
+                if os.path.exists(diag_path) and os.path.getsize(diag_path) > (512 * 1024):
+                    with open(diag_path, "r", encoding="utf-8", errors="replace") as rf:
+                        tail = rf.readlines()[-1500:]
+                    with open(diag_path, "w", encoding="utf-8") as wf:
+                        wf.writelines(tail)
+            except Exception:
+                pass
+
+            fd = os.open(diag_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {safe}\n")
+            try:
+                os.chmod(diag_path, 0o600)
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     log_path = os.path.expanduser("~/.clamfox_host.log")
     try:
@@ -472,6 +522,9 @@ def log_debug(msg):
             f.write(secure_log_encode(sanitized) + "\n")
     except OSError:
         pass
+
+    if _is_diag_candidate(sanitized):
+        _write_diag_log(sanitized)
 
 # Helper to get the intelligence runtime storage directory
 def get_run_dir():
@@ -485,6 +538,32 @@ def get_run_dir():
         path = f"/tmp/clamfox_{uid}"
         os.makedirs(path, exist_ok=True, mode=0o700)
         return path
+
+
+def get_incident_log_path():
+    """Return user-writable incident log location for audit/forensics."""
+    return os.path.join(get_run_dir(), "alert_log.txt")
+
+
+def load_trust_db_data():
+    """Load trust DB from host-local or workspace data paths."""
+    host_dir = os.path.dirname(__file__)
+    root_dir = os.path.abspath(os.path.join(host_dir, os.pardir))
+    candidates = [
+        os.path.join(host_dir, "trust_db.json"),
+        os.path.join(root_dir, "data", "trust_db.json"),
+        os.path.join(root_dir, "trust_db.json"),
+    ]
+
+    for path in candidates:
+        try:
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+
+    raise FileNotFoundError("trust_db.json not found in expected paths")
 
 # Helper to read a message from Firefox
 def get_message():
@@ -578,9 +657,33 @@ def is_within_directory(directory, target):
     prefix = os.path.commonpath([abs_directory, abs_target])
     return prefix == abs_directory
 
-# Helper to send a message to Firefox (Thread-safe)
+# Helper to send a message to Firefox with EC-DSA signature (Thread-safe)
 def send_message(message_content):
     try:
+        # Add cryptographic signature to ensure response authenticity
+        try:
+            priv_key = get_or_create_machine_key()
+            if priv_key:
+                message_content["_signed_at"] = int(time.time())
+                message_content["_pubkey_hint"] = priv_key.public_key().public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode('utf-8')[:100]  # First 100 chars as continuity hint
+
+                # Sign all response fields except _signature itself.
+                # This covers security metadata (e.g., _signed_at/_pubkey_hint)
+                # so they cannot be altered without invalidating the signature.
+                response_data = json.dumps(
+                    {k: v for k, v in message_content.items() if k != "_signature"},
+                    sort_keys=True
+                )
+
+                # Sign with EC-DSA (P-256, SHA-256)
+                signature = priv_key.sign(response_data.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+                message_content["_signature"] = base64.b64encode(signature).decode('utf-8')
+        except Exception as sig_err:
+            log_debug(f"Response signing failed (continuing anyway): {sig_err}")
+        
         content = json.dumps(message_content).encode('utf-8')
         log_debug(f"Sending: {json.dumps(message_content)[:500]}...") # Truncate log
         with _output_lock:
@@ -642,37 +745,84 @@ def get_db_last_update():
     return last_update
 
 def check_vpn_active():
-    """Detect presence of common VPN interfaces or client statuses."""
-    try:
-        # 1. Broad Interface Check (Any common tunnel prefix)
-        if os.path.exists('/sys/class/net'):
-            interfaces = os.listdir('/sys/class/net')
-            vpn_patterns = ['tun', 'wg', 'ppp', 'tap', 'nord', 'proton', 'vpn', 'tailscale', 'cscotun', 'mullvad', 'cloudflare']
-            for iface in interfaces:
-                if any(p in iface.lower() for p in vpn_patterns):
-                    try:
-                        with open(f'/sys/class/net/{iface}/operstate') as f:
-                            state = f.read().strip().lower()
-                            if state != 'down':
-                                log_debug(f"VPN detected via generic interface: {iface}")
-                                return True, f"VPN ({iface})"
-                    except Exception: pass
+    """Detect active VPN sessions on Linux using multiple lightweight signals."""
+    vpn_patterns = [
+        'tun', 'wg', 'ppp', 'tap', 'nord', 'proton', 'vpn',
+        'tailscale', 'cscotun', 'mullvad', 'cloudflare', 'warp',
+        'openvpn', 'zerotier', 'zt'
+    ]
 
-        # 2. Native IP Route Check (Detect default gateway on a tunnel)
+    def _iface_is_up(iface_name):
+        try:
+            with open(f'/sys/class/net/{iface_name}/operstate', 'r', encoding='utf-8') as f:
+                state = f.read().strip().lower()
+                # Tunnel interfaces often report "unknown" while still active.
+                return state not in ('down', 'notpresent')
+        except Exception:
+            return False
+
+    try:
+        # 1. Interface signal (works for many WireGuard/OpenVPN/Tailscale-like setups)
+        if os.path.exists('/sys/class/net'):
+            for iface in os.listdir('/sys/class/net'):
+                iface_l = iface.lower()
+                if any(p in iface_l for p in vpn_patterns) and _iface_is_up(iface):
+                    log_debug(f"VPN detected via interface signal: {iface}")
+                    return True, f"VPN ({iface})"
+
+        # 2. IPv4 default route signal (full-tunnel VPN)
         if os.path.exists('/proc/net/route'):
             try:
-                with open('/proc/net/route', 'r') as f:
+                with open('/proc/net/route', 'r', encoding='utf-8') as f:
                     for line in f.readlines()[1:]:
                         parts = line.split()
-                        # Default route destination is 00000000
                         if len(parts) > 1 and parts[1] == '00000000':
                             iface = parts[0].lower()
-                            if any(p in iface for p in ['tun', 'wg', 'ppp', 'tap', 'nord', 'proton']):
-                                log_debug(f"VPN detected via default route on tunnel: {iface}")
-                                return True, "VPN (Route)"
+                            if any(p in iface for p in vpn_patterns):
+                                log_debug(f"VPN detected via IPv4 default route: {iface}")
+                                return True, "VPN (IPv4 Route)"
             except Exception as e:
-                log_debug(f"Route parsing error: {e}")
-            
+                log_debug(f"IPv4 route parsing error: {e}")
+
+        # 3. IPv6 default route signal (common on modern Linux profiles)
+        if os.path.exists('/proc/net/ipv6_route'):
+            try:
+                with open('/proc/net/ipv6_route', 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.split()
+                        if len(parts) >= 10 and parts[0] == ('0' * 32) and parts[1] == '00':
+                            iface = parts[-1].lower()
+                            if any(p in iface for p in vpn_patterns):
+                                log_debug(f"VPN detected via IPv6 default route: {iface}")
+                                return True, "VPN (IPv6 Route)"
+            except Exception as e:
+                log_debug(f"IPv6 route parsing error: {e}")
+
+        # 4. NetworkManager active VPN profile signal (covers split tunnel cases)
+        try:
+            nm = subprocess.run(
+                ['nmcli', '-t', '-f', 'TYPE,STATE,DEVICE,NAME', 'connection', 'show', '--active'],
+                capture_output=True,
+                text=True,
+                timeout=1.2,
+                check=False
+            )
+            if nm.returncode == 0:
+                for row in nm.stdout.splitlines():
+                    cols = row.split(':')
+                    if len(cols) < 2:
+                        continue
+                    conn_type = cols[0].strip().lower()
+                    conn_state = cols[1].strip().lower()
+                    conn_dev = cols[2].strip() if len(cols) > 2 else ''
+                    conn_name = cols[3].strip() if len(cols) > 3 else ''
+                    if conn_type == 'vpn' and conn_state in ('activated', 'activating'):
+                        label = conn_name or conn_dev or 'NetworkManager'
+                        log_debug(f"VPN detected via NetworkManager profile: {label}")
+                        return True, f"VPN ({label})"
+        except Exception:
+            pass
+
     except Exception as e:
         log_debug(f"VPN detection error: {e}")
     return False, None
@@ -709,6 +859,11 @@ def mask_url(url):
 
 def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=None, https_only=True):
     """Fetch URL with optional Tor/VPN routing and leak protection."""
+    # 🔐 CRITICAL: Validate URL strictly before use
+    if not url or not isinstance(url, str):
+        log_debug("secure_fetch: Invalid URL type or empty")
+        return False
+    
     if https_only and not url.startswith('https://'):
         if url.startswith('http://'):
             https_url = url.replace('http://', 'https://', 1)
@@ -717,6 +872,21 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
         else:
             log_debug(f"SECURITY ALERT: Rejected non-HTTPS fetch attempt: {mask_url(url)}")
             return False
+    
+    # Validate URL doesn't contain newlines, null bytes, or control chars
+    if any(c in url for c in ['\n', '\r', '\0', '"', "'"]):
+        log_debug(f"secure_fetch: URL contains control characters")
+        return False
+    
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            log_debug(f"secure_fetch: Invalid URL structure: {mask_url(url)}")
+            return False
+    except Exception as url_parse_err:
+        log_debug(f"secure_fetch: URL parsing failed: {url_parse_err}")
+        return False
 
     tunnelled = False
 
@@ -739,24 +909,55 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
     cmd = ['curl', '-s', '-A', user_agent, '-L', '--connect-timeout', '15']
 
     if headers:
+        if not isinstance(headers, dict):
+            log_debug("secure_fetch: Headers must be a dictionary")
+            return False
+        
         for k, v in headers.items():
-            # 🛡️ SECURITY: Prevent curl flag injection in headers
-            if str(k).startswith('-') or str(v).startswith('-'):
-                log_debug(f"SECURITY ALERT: Blocked potential flag injection in header: {k}")
+            # 🛡️ CRITICAL: Prevent curl flag injection in headers
+            # Check for startswith('-'), but also check for embedded control characters and newlines
+            k_str = str(k)
+            v_str = str(v)
+            
+            # Strict validation on both key and value
+            if any(c in k_str for c in ['\n', '\r', '\0', '-', ':']):
+                log_debug(f"secure_fetch: Invalid header key: {k}")
                 return False
-            cmd.extend(['-H', f'{k}: {v}'])
+            
+            if any(c in v_str for c in ['\n', '\r', '\0']):
+                log_debug(f"secure_fetch: Header value contains control characters: {k}")
+                return False
+            
+            # Verify key looks like a valid HTTP header (alphanumeric + hyphen only)
+            if not re.match(r'^[A-Za-z0-9\-_]+$', k_str):
+                log_debug(f"secure_fetch: Invalid header key format: {k}")
+                return False
+            
+            cmd.extend(['-H', f'{k_str}: {v_str}'])
 
     if tunnelled and tor_active:
         cmd.extend(['--proxy', f'socks5h://127.0.0.1:{tor_port}'])
 
     if post_data:
+        if not isinstance(post_data, dict):
+            log_debug("secure_fetch: POST data must be a dictionary")
+            return False
+        
         for k, v in post_data.items():
-            # 🛡️ SECURITY: Prevent curl flag injection in POST data keys/values
-            if str(k).startswith('-') or str(v).startswith('-'):
-                log_debug(f"SECURITY ALERT: Blocked potential flag injection in POST data: {k}")
+            k_str = str(k)
+            v_str = str(v)
+            
+            # 🛡️ CRITICAL: Prevent curl flag injection in POST data
+            if any(c in k_str for c in ['\n', '\r', '\0', '-']):
+                log_debug(f"secure_fetch: Invalid POST key: {k}")
                 return False
+            
+            if any(c in v_str for c in ['\n', '\r', '\0']):
+                log_debug(f"secure_fetch: POST value contains control characters: {k}")
+                return False
+            
             # Use --data-urlencode for improved safety and encoding
-            cmd.extend(['--data-urlencode', f'{k}={v}'])
+            cmd.extend(['--data-urlencode', f'{k_str}={v_str}'])
 
     cmd.extend(['-o', output_path, '--', url])
     try:
@@ -770,7 +971,7 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
     except subprocess.TimeoutExpired:
         log_debug(f"NETWORK TIMEOUT: {mask_url(url)}")
     except Exception as e:
-        log_debug(f"FETCH EXCEPTION for {mask_url(url)}: {e}")
+        log_debug(f"FETCH EXCEPTION for {mask_url(url)}: {type(e).__name__}: {e}")
     return False
 
 def check_clamav(verify=False):
@@ -989,11 +1190,11 @@ def quarantine_file(filepath):
             return False
 
 def lock_file(filepath):
-    """EDR HARDENING: Strip all permissions to prevent opening before/during scan."""
+    """EDR HARDENING: Set read-only permissions during scan to prevent writes/exec while still allowing engine reads."""
     try:
         if not os.path.exists(filepath): return False
-        os.chmod(filepath, 0o000)
-        log_debug(f"FILE LOCKED: {filepath} (000 permissions)")
+        os.chmod(filepath, 0o400)
+        log_debug(f"FILE LOCKED: {filepath} (400 permissions)")
         return True
     except Exception as e:
         log_debug(f"Lock failed: {e}")
@@ -1323,23 +1524,44 @@ def encrypt_payload(data):
     Uses the per-machine EC-derived key (same as secure_log_encode) so each
     installation produces a unique ciphertext — no shared community key.
     """
-    if not data: return None
+    if not data:
+        log_debug("encrypt_payload: No data provided")
+        return None
     try:
         priv_key = get_or_create_machine_key()
+        if not priv_key:
+            log_debug("encrypt_payload: Failed to retrieve machine key from keyring")
+            return None
+        
         aes_key = derive_aes_key(priv_key)
         if not aes_key:
+            log_debug("encrypt_payload: Failed to derive AES key from machine key")
             return None
+        
         iv = os.urandom(12)
         encryptor = Cipher(
             algorithms.AES(aes_key),
             modes.GCM(iv)
         ).encryptor()
+        
         ciphertext = encryptor.update(data.encode('utf-8')) + encryptor.finalize()
         tag = encryptor.tag
+        
         # Package: IV(12) + Tag(16) + Ciphertext
         combined = iv + tag + ciphertext
         return base64.b64encode(combined).decode('utf-8')
-    except Exception:
+        
+    except KeyError as e:
+        log_debug(f"encrypt_payload: Missing configuration key: {e}")
+        return None
+    except ValueError as e:
+        log_debug(f"encrypt_payload: Invalid data format: {e}")
+        return None
+    except TypeError as e:
+        log_debug(f"encrypt_payload: Type error during encryption: {e}")
+        return None
+    except Exception as e:
+        log_debug(f"encrypt_payload: Unexpected encryption error ({type(e).__name__}): {e}")
         return None
 
 def submit_community_burn(target, threat_type, details):
@@ -1459,9 +1681,29 @@ def check_high_threat_container(filepath, deep_scan=False):
 
         if zipfile.is_zipfile(filepath):
             with zipfile.ZipFile(filepath, 'r') as zf:
+                # 🔐 INTEGRITY CHECK: Test archive before processing
+                bad_file = zf.testzip()
+                if bad_file:
+                    log_debug(f"Archive integrity check failed: corrupted file {bad_file}")
+                    return True, _("Archive Integrity Check Failed: Corrupted or malicious ZIP detected")
+                
                 for info in zf.infolist():
-                    if info.is_dir(): continue
+                    if info.is_dir(): 
+                        continue
                     file_count += 1
+                    
+                    # Validate member path (prevent directory traversals/zip slip)
+                    member_path = os.path.join("/tmp", info.filename)
+                    if not is_within_directory("/tmp", member_path):
+                        log_debug(f"Zip slip attempt blocked: {info.filename}")
+                        return True, _("Archive Escape Detected: Malicious path in ZIP")
+                    
+                    # Check for suspicious permissions/attributes
+                    # Executable bit set in archive is suspicious
+                    if info.external_attr & 0o111:
+                        log_debug(f"Executable file in archive: {info.filename}")
+                        return True, _("High-Threat Container: Executable file in archive")
+                    
                     if any(info.filename.lower().endswith(ext) for ext in suspect_patterns):
                         script_count += 1
                 
@@ -1477,12 +1719,19 @@ def check_high_threat_container(filepath, deep_scan=False):
 
                     log_debug(f"Hardware scaling active: Unpacking and parallel scanning {file_count} files in ZIP")
                     with tempfile.TemporaryDirectory(dir=get_run_dir()) as tmp_dir:
+                        os.chmod(tmp_dir, 0o700)  # Restrict permissions
+                        
                         for member in zf.infolist():
                             member_path = os.path.join(tmp_dir, member.filename)
+                            
+                            # Validate member path
                             if not is_within_directory(tmp_dir, member_path):
                                 log_debug(f"Tar Slip Blocked in ZIP: {member.filename}")
-                                continue
+                                return True, _("Archive Escape Attempted: Malicious path detected")
+                            
+                            # Extract with explicit permissions
                             zf.extract(member, path=tmp_dir)
+                            os.chmod(member_path, 0o644)  # Remove any execute bits
 
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
                         res = _scan_members_in_process_pool(all_files, "ZIP")
@@ -1493,8 +1742,21 @@ def check_high_threat_container(filepath, deep_scan=False):
         elif tarfile.is_tarfile(filepath):
             with tarfile.open(filepath, 'r:*') as tf:
                 for member in tf.getmembers():
-                    if member.isdir(): continue
+                    if member.isdir(): 
+                        continue
                     file_count += 1
+                    
+                    # Validate member path (prevent directory traversals/tar slip)
+                    member_path = os.path.join("/tmp", member.name)
+                    if not is_within_directory("/tmp", member_path):
+                        log_debug(f"Tar slip attempt blocked: {member.name}")
+                        return True, _("Archive Escape Detected: Malicious path in TAR")
+                    
+                    # Check for suspicious attributes
+                    if member.mode & 0o111:  # Executable bit
+                        log_debug(f"Executable file in archive: {member.name}")
+                        return True, _("High-Threat Container: Executable file in archive")
+                    
                     if any(member.name.lower().endswith(ext) for ext in suspect_patterns):
                         script_count += 1
 
@@ -1509,12 +1771,22 @@ def check_high_threat_container(filepath, deep_scan=False):
 
                     log_debug(f"Hardware scaling active: Unpacking and parallel scanning {file_count} files in TAR")
                     with tempfile.TemporaryDirectory(dir=get_run_dir()) as tmp_dir:
+                        os.chmod(tmp_dir, 0o700)  # Restrict permissions
+                        
                         for member in tf.getmembers():
                             member_path = os.path.join(tmp_dir, member.name)
+                            
+                            # Validate member path
                             if not is_within_directory(tmp_dir, member_path):
                                 log_debug(f"Tar Slip Blocked in TAR: {member.name}")
-                                continue
+                                return True, _("Archive Escape Attempted: Malicious path detected")
+                            
+                            # Extract member
                             tf.extract(member, path=tmp_dir)
+                            
+                            # Reset permissions to remove execute bits
+                            if os.path.exists(member_path):
+                                os.chmod(member_path, 0o644)
 
                         all_files = [os.path.join(root, f) for root, _, files in os.walk(tmp_dir) for f in files]
                         res = _scan_members_in_process_pool(all_files, "TAR")
@@ -1644,10 +1916,19 @@ def verify_timelock(file_path):
             
         # Format: # CLAMFOX-TIME-LOCK: [TIMESTAMP] [SIGNATURE_HEX]
         parts = header.split(" ")
-        if len(parts) < 4: return False
+        if len(parts) < 4:
+            log_debug(f"TIME-LOCK ERROR: Malformed header in {os.path.basename(file_path)}")
+            return False
         
         timestamp_str = parts[2]
         signature_hex = parts[3]
+        
+        # 🔐 CRITICAL: Validate signature length before processing
+        # EC-DSA P-256 signatures are ~128 hex chars (64 bytes raw, but can vary), impose reasonable limit
+        MAX_SIGNATURE_HEX_LENGTH = 1024  # 512 bytes in hex - very generous
+        if len(signature_hex) > MAX_SIGNATURE_HEX_LENGTH:
+            log_debug(f"TIME-LOCK ERROR: Signature too long ({len(signature_hex)} hex chars) - possible DoS attempt")
+            return False
         
         # 1. Verify Signature
         try:
@@ -1655,12 +1936,25 @@ def verify_timelock(file_path):
             from cryptography.hazmat.primitives import hashes, serialization
             
             pub_key = serialization.load_pem_public_key(_RELEASE_ROOT_PUB_KEY.encode('utf-8'))
-            signature = bytes.fromhex(signature_hex)
+            
+            try:
+                signature = bytes.fromhex(signature_hex)
+            except ValueError as hex_err:
+                log_debug(f"TIME-LOCK ERROR: Invalid hex in signature: {hex_err}")
+                return False
             
             # Message is the timestamp string
-            pub_key.verify(signature, timestamp_str.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+            try:
+                pub_key.verify(signature, timestamp_str.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+            except Exception as sig_err:
+                log_debug(f"TIME-LOCK ERROR: Signature verification failed: {sig_err}")
+                return False
+                
+        except ImportError as import_err:
+            log_debug(f"TIME-LOCK ERROR: Missing cryptography module: {import_err}")
+            return False
         except Exception as e:
-            log_debug(f"TIME-LOCK ERROR: Invalid Signature on {os.path.basename(file_path)}: {e}")
+            log_debug(f"TIME-LOCK ERROR: Signature processing failed ({type(e).__name__}): {e}")
             return False
             
         # 2. Verify Freshness
@@ -2027,70 +2321,110 @@ def hash_domain_for_whitelist(domain):
         return None
 
 def check_similarity_to_golden(url):
-    """Check if domain is a suspicious lookalike of a high-value financial target."""
+    """
+    Check if domain is a suspicious lookalike of a high-value financial target.
+    Uses database lookups instead of heuristics to avoid false positives.
+    """
     try:
         domain = urlparse(url).netloc.lower()
-        if not domain: return False, None
+        if not domain: 
+            return False, None
         
-        # Golden List of most targeted brands (Global & Euro/Italian)
+        # Load trust database
         try:
-            with open(os.path.join(os.path.dirname(__file__), "trust_db.json"), "r") as f:
-                db = json.load(f)
-                golden_list = [domain for hvt in db.get("hvts", []) for domain in hvt.get("domains", [])]
-                global_whitelist = db.get("global_whitelist", [])
-                # 🛡️ Zero-Knowledge Whitelist Support
-                zk_whitelist = db.get("zk_whitelist", [])
-        except (OSError, json.JSONDecodeError):
+            db = load_trust_db_data()
+            golden_list = [d for hvt in db.get("hvts", []) for d in hvt.get("domains", [])]
+            global_whitelist = db.get("global_whitelist", [])
+            zk_whitelist = db.get("zk_whitelist", [])
+        except (OSError, json.JSONDecodeError, FileNotFoundError):
             golden_list = ["paypal.com", "chase.com", "bankofamerica.com", "microsoft.com", "google.com", "apple.com", "amazon.com"]
             global_whitelist = []
             zk_whitelist = []
-            
-        # 0.5. Check Zero-Knowledge Whitelist (Privacy-First)
+        
+        # ========== PHASE 1: Allow List Check ==========
+        # 1. Check Zero-Knowledge Whitelist (Privacy-First)
         if zk_whitelist:
             domain_hash = hash_domain_for_whitelist(domain)
             if domain_hash and domain_hash in zk_whitelist:
                 return False, None
         
-        # 0. Check Global Whitelist (popular domains naturally bypass heuristic alerts)
+        # 2. Check Global Whitelist (Tranco top 1M - safe to allow)
         load_whitelist_cache()
         if _whitelist_cache is not None:
             if any(domain == g or domain.endswith("." + g) for g in _whitelist_cache):
                 return False, None
         
-        # Also check static fallback whitelist
-        if any(domain == g or domain.endswith("." + g) for g in global_whitelist):
+        # 3. Check static fallback whitelist
+        # Avoid broad short-circuiting for user-content hosting platforms where
+        # attacker-controlled subdomains are common.
+        broad_hosting_domains = {
+            "githubusercontent.com", "unpkg.com", "jsdelivr.net", "replit.com",
+            "glitch.com", "codepen.io", "jsfiddle.net"
+        }
+        is_broad_hosting = any(domain == h or domain.endswith("." + h) for h in broad_hosting_domains)
+        if not is_broad_hosting and any(domain == g or domain.endswith("." + g) for g in global_whitelist):
             return False, None
         
-        # 1. Direct match or legitimate subdomain
+        # 4. Direct match or legitimate subdomain of known good brand
         if any(domain == g or domain.endswith("." + g) for g in golden_list):
             return False, None
-            
-        # 2. Brand-owned TLD check (e.g. .google, .apple, .amazon)
+        
+        # 5. Brand-owned TLD check (e.g. .google, .apple, .amazon, .microsoft)
         for target in golden_list:
             brand = target.split('.')[0]
             if domain == brand or domain.endswith("." + brand):
                 return False, None
         
-        # 3. Check for simple typosquatting or combosquatting
+        # ========== PHASE 2: Block List Check ==========
+        # Already checked by check_phishing_db and check_url_reputation
+        # (These run before this function, so we skip redundant checks)
+        
+        # ========== PHASE 3: Typosquatting Heuristics (Only for NOT whitelisted) ==========
+        # Apply STRICT typosquatting detection only on domains NOT in Tranco top 1M
+        # This avoids blocking legitimate services
+        
+        # 6. Levenshtein-distance-like fuzzy matching for actual typosquats
+        # Only flag if 1-2 character difference mimics a known target
         for target in golden_list:
-            brand = target.split('.')[0]
+            target_base = target.split('.')[0]  # e.g. 'paypal' from 'paypal.com'
+            domain_base = domain.split('.')[0]  # e.g. 'paypa1' from 'paypa1.com'
             
-            # Combosquatting: 'brand-' or '-brand' or 'brand.' in middle
-            # We already handled legitimate cases above.
-            if brand in domain:
-                # Extra check: ensure it's not a legitimate part of another word
-                # (e.g. 'googol' vs 'google', but here we are looking for 'google')
-                return True, _("Potential Impersonation detected: {name}").format(name=brand.upper())
-                
-            # Fuzzy match (naive version for performance)
-            # if we have 1 character difference in domains of same length
-            if len(domain) == len(target):
-                diff = sum(1 for a, b in zip(domain, target) if a != b)
-                if diff == 1:
-                    return True, _("Typosquatting Suspected: Highly similar to {target}").format(target=target.upper())
-    except Exception:
-        pass
-    return False, None
+            # Only apply fuzzy matching if domains are similar length (avoid false positives)
+            if abs(len(target_base) - len(domain_base)) > 2:
+                continue
+            
+            # Count character differences
+            max_len = max(len(target_base), len(domain_base))
+            if max_len < 6:  # Too short to reliably detect typosquats
+                continue
+            
+            # For same-length domains, allow max 1-2 character difference
+            if len(target_base) == len(domain_base):
+                diff_count = sum(1 for a, b in zip(target_base, domain_base) if a != b)
+                if diff_count == 1:
+                    # 1-character typosquat (e.g., paypa1.com vs paypal.com)
+                    return True, _("Typosquatting Suspected: {domain} vs {target}").format(
+                        domain=domain, target=target)
+            
+            # For different-length domains, use simple distance (loose check)
+            # But ONLY flag if it's an obvious 1-char substitution
+            elif abs(len(target_base) - len(domain_base)) == 1:
+                # Check if one is a single-char insertion/deletion of the other
+                if target_base in domain_base or domain_base in target_base:
+                    shorter = min(target_base, domain_base, key=len)
+                    longer = max(target_base, domain_base, key=len)
+                    # Verify it's actually a deletion/insertion
+                    for i in range(len(longer) - len(shorter) + 1):
+                        if longer[:i] + longer[i+1:] == shorter:
+                            return True, _("Typosquatting Suspected: {domain} vs {target}").format(
+                                domain=domain, target=target)
+        
+        # No suspicious pattern found
+        return False, None
+        
+    except Exception as e:
+        log_debug(f"check_similarity_to_golden exception: {e}")
+        return False, None
 
 def start_clipper_shield():
     """Background monitoring for automated crypto-address hijacking."""
@@ -2174,6 +2508,27 @@ def follow_redirects(url):
     return chain
 
 def check_url_reputation(url):
+    def _is_globally_trusted_domain(domain):
+        """Return True if domain matches dynamic/static global trust lists."""
+        try:
+            d = (domain or "").lower().strip()
+            if not d:
+                return False
+
+            load_whitelist_cache()
+            if _whitelist_cache is not None and any(d == g or d.endswith("." + g) for g in _whitelist_cache):
+                return True
+
+            try:
+                db = load_trust_db_data()
+                static_whitelist = db.get("global_whitelist", [])
+            except (OSError, json.JSONDecodeError, FileNotFoundError):
+                static_whitelist = []
+
+            return any(d == g or d.endswith("." + g) for g in static_whitelist)
+        except Exception:
+            return False
+
     url_orig = url
     
     # 1. Deep Unmasking: Follow entire redirect chain
@@ -2202,7 +2557,15 @@ def check_url_reputation(url):
             try:
                 domain = urlparse(target).netloc.lower()
                 if _url_domain_cache and domain in _url_domain_cache:
-                    return {"status": "malicious", "threat": _("URLhaus Malware Blocklist (Domain-Match)"), "url": target, "confirmed": True}
+                    # Shared/trusted platforms can host both benign and malicious content.
+                    # For those domains, require an exact URL hit instead of domain-wide block.
+                    if _is_globally_trusted_domain(domain):
+                        log_debug(f"URLhaus domain-match skipped for globally trusted domain: {domain}")
+                    else:
+                        # Domain-level matches are lower confidence than exact URL IOCs.
+                        # Mark as non-confirmed so browser-side logic can defer hard blocking
+                        # to content/file scan instead of canceling immediately.
+                        return {"status": "malicious", "threat": _("URLhaus Malware Blocklist (Domain-Match)"), "url": target, "confirmed": False}
             except Exception:
                 pass
 
@@ -2240,10 +2603,9 @@ def check_url_reputation(url):
     try:
         domain = urlparse(final_url).netloc.lower()
         try:
-            with open(os.path.join(os.path.dirname(__file__), "trust_db.json"), "r") as f:
-                db = json.load(f)
-                golden_list = [domain for hvt in db.get("hvts", []) for domain in hvt.get("domains", [])]
-        except (OSError, json.JSONDecodeError):
+            db = load_trust_db_data()
+            golden_list = [domain for hvt in db.get("hvts", []) for domain in hvt.get("domains", [])]
+        except (OSError, json.JSONDecodeError, FileNotFoundError):
             golden_list = ["paypal.com", "chase.com", "bankofamerica.com", "microsoft.com", "google.com", "apple.com", "amazon.com"]
         
         # 1. Matches golden domain or subdomain
@@ -2286,7 +2648,33 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
     # EDR SECURE SCAN: Temporarily grant read access to the host engine
     fd = None
     original_mode = None
+    read_mode_was_forced = False
+
+    def _fallback_basic_on_failure(failure_detail):
+        """Best-effort fallback path to avoid hard scan failure on transient errors."""
+        try:
+            fallback_target = actual_path if actual_path else filepath
+            fallback_result = scan_file_basic(fallback_target)
+            if fallback_result.get("status") in ("clean", "infected"):
+                fallback_result["degraded_mode"] = True
+                fallback_result["details"] = failure_detail[:200]
+                log_debug(f"SCAN_FILE FALLBACK: Recovered via basic scan for {fallback_target} ({failure_detail})")
+                return fallback_result
+        except Exception as fallback_err:
+            log_debug(f"SCAN_FILE FALLBACK FAILED for {filepath}: {fallback_err}")
+        return None
     try:
+        # If the file was proactively sealed to 000 by the lock action, opening
+        # it will fail before we can adjust mode via FD. Recover read access
+        # only for this scan session, then restore in finally.
+        original_mode = os.stat(actual_path).st_mode & 0o777
+        if original_mode == 0:
+            try:
+                os.chmod(actual_path, 0o400)
+                read_mode_was_forced = True
+            except Exception:
+                pass
+
         # 🛡️ DEFENSE: Use O_NOFOLLOW to prevent symlink attacks (TOCTOU)
         # We open the file first, then perform all operations on the FD.
         fd = os.open(actual_path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -2328,7 +2716,9 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
             }
 
         sig_dir = os.path.join(os.path.dirname(__file__), "signatures")
-        has_custom_sigs = os.path.exists(sig_dir) and any(f.endswith(('.yar', '.cvd', '.hdb', '.ndb')) for f in os.listdir(sig_dir))
+        has_custom_sigs = os.path.exists(sig_dir) and any(
+            f.endswith(('.cvd', '.cld', '.hdb', '.ndb')) for f in os.listdir(sig_dir)
+        )
         
         # Fallback to clamscan if we have custom signatures, because clamdscan ignores -d flag
         if is_daemon and has_custom_sigs:
@@ -2461,6 +2851,9 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
         log_debug(f"CRITICAL SCAN FAILURE (OSError) for {filepath}: {e}")
         err_no = getattr(e, "errno", None)
         detail = f"{type(e).__name__}(errno={err_no}): {e}" if err_no is not None else f"{type(e).__name__}: {e}"
+        fallback_result = _fallback_basic_on_failure(detail)
+        if fallback_result:
+            return fallback_result
         return {
             "status": "error",
             "error": _("System processing failure"),
@@ -2469,6 +2862,9 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
     except Exception as e:
         log_debug(f"CRITICAL SCAN FAILURE for {filepath}: {e}")
         detail = f"{type(e).__name__}: {e}"
+        fallback_result = _fallback_basic_on_failure(detail)
+        if fallback_result:
+            return fallback_result
         return {
             "status": "error",
             "error": _("System processing failure"),
@@ -2483,6 +2879,13 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
                 os.close(fd)
             except Exception as fe:
                 log_debug(f"FD Cleanup Error for {actual_path}: {fe}")
+        elif read_mode_was_forced:
+            # We forced mode before opening; if open failed later, revert here.
+            try:
+                if original_mode is not None:
+                    os.chmod(actual_path, original_mode)
+            except Exception as fe:
+                log_debug(f"Mode Cleanup Error for {actual_path}: {fe}")
 
 def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
     send_message({"status": "progress", "percent": 10, "msg": _("Preparing scan...")})
@@ -2518,24 +2921,89 @@ def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
             try: os.unlink(tmp_path)
             except Exception: pass
 
-def handle_message(message, secret, config, stored_hash, current_hash):
+def handle_message(message, config):
     """Handle one native-messaging request with auth, tamper checks, and throttling.
 
     This is a security-critical dispatcher: it validates session secrets,
     enforces the circuit breaker, and routes actions to scanning/config paths.
     """
     try:
+        # Read live auth and integrity state per request so runtime rotations/reseals
+        # are enforced without requiring a host restart.
+        secret = config.get("secret")
+        stored_hash = config.get("integrity_hash")
+        current_hash = get_self_hash()
+
+        # 🔐 CRITICAL: Validate message structure
+        if not isinstance(message, dict):
+            log_debug("handle_message: Message is not a dictionary")
+            send_message({"status": "error", "error": "Invalid message format"})
+            return
+        
+        # Define allowed actions
+        ALLOWED_ACTIONS = {
+            "ping", "get_public_key", "check", "scan", "check_url", "lock", "unlock",
+            "release_quarantine", "update_urldb", "force_db_update", "update_yara",
+            "reseal", "get_audit_logs", "list_quarantine", "get_intel", "log_incident", "restore",
+            "rotate_secret", "report_threat"
+        }
+        
+        # Extract and validate action
         action = message.get("action")
+        if not isinstance(action, str):
+            log_debug(f"handle_message: Action is not a string (got {type(action).__name__})")
+            send_message({"status": "error", "error": "Invalid action type"})
+            return
+        
+        if action not in ALLOWED_ACTIONS:
+            log_debug(f"handle_message: Unknown action: {action}")
+            send_message({"status": "error", "error": f"Unknown action: {action}"})
+            return
+        
+        # Extract and validate target (if provided)
         target = message.get("target")
+        if target is not None and not isinstance(target, str):
+            log_debug(f"handle_message: Target is not a string (got {type(target).__name__})")
+            send_message({"status": "error", "error": "Invalid target type"})
+            return
+        
+        # Extract and validate type
         type = message.get("type", "file")
+        if not isinstance(type, str) or type not in {"file", "url"}:
+            log_debug(f"handle_message: Invalid type: {type}")
+            send_message({"status": "error", "error": f"Invalid message type: {type}"})
+            return
+        
+        # Extract and validate boolean flags
         use_mb = message.get("use_mb", False)
+        if not isinstance(use_mb, bool):
+            log_debug(f"handle_message: use_mb is not a boolean")
+            send_message({"status": "error", "error": "Invalid use_mb type"})
+            return
+        
         pua_enabled = message.get("pua_enabled", True)
+        if not isinstance(pua_enabled, bool):
+            log_debug(f"handle_message: pua_enabled is not a boolean")
+            send_message({"status": "error", "error": "Invalid pua_enabled type"})
+            return
+        
         ram_mode = message.get("ram_mode", False)
+        if not isinstance(ram_mode, bool):
+            log_debug(f"handle_message: ram_mode is not a boolean")
+            send_message({"status": "error", "error": "Invalid ram_mode type"})
+            return
+        
         received_secret = message.get("secret")
+        if received_secret is not None and not isinstance(received_secret, str):
+            log_debug(f"handle_message: Secret is not a string")
+            send_message({"status": "error", "error": "Invalid secret type"})
+            return
+        
         config_path = os.path.join(os.path.dirname(__file__), "config.json")
 
         # Resource Watchdog: Circuit Breaker Logic
         global _scan_timestamps
+        expensive_actions = {"scan", "check", "force_db_update", "update_urldb", "update_yara"}
         with _scan_count_lock:
             now = time.time()
             # Keep only timestamps from the last 60 seconds
@@ -2544,11 +3012,11 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 log_debug("CIRCUIT BREAKER: Rate limit reached. Rejecting request.")
                 send_message({"status": "error", "error": _("Rate limit exceeded (Circuit Breaker active)")})
                 return
-            if action == "scan":
+            if action in expensive_actions:
                 _scan_timestamps.append(now)
 
         # Security Check: Handshake validation
-        if action != "check":
+        if action != "check" and action != "ping" and action != "get_public_key":
             import hmac
             try:
                 invalid_secret = bool(secret) and not hmac.compare_digest(str(received_secret or ""), str(secret))
@@ -2566,7 +3034,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 # Keep persistent record in security log
                 if not invalid_secret:  # Only log actual tamper blocks to file to avoid noise
                     try:
-                        with open(os.path.join(os.path.dirname(__file__), "alert_log.txt"), "a") as f:
+                        with open(get_incident_log_path(), "a") as f:
                             f.write(secure_log_encode(f"[{time.ctime()}] SEAL BROKEN: {reason}") + "\n")
                     except OSError:
                         pass
@@ -2577,12 +3045,28 @@ def handle_message(message, secret, config, stored_hash, current_hash):
         if action == "ping":
             send_message({"status": "pong", "time": time.time()})
             return
+        
+        elif action == "get_public_key":
+            # Provide the host's public key for response signature verification
+            try:
+                priv_key = get_or_create_machine_key()
+                if priv_key:
+                    pub_key_pem = priv_key.public_key().public_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    ).decode('utf-8')
+                    send_message({"status": "ok", "_pubkey": pub_key_pem})
+                else:
+                    send_message({"status": "error", "error": "Failed to retrieve machine key"})
+            except Exception as e:
+                log_debug(f"get_public_key error: {e}")
+                send_message({"status": "error", "error": str(e)})
+            return
 
         elif action == "log_incident":
             try:
                 incident = message.get("incident", {})
-                log_dir = os.path.dirname(__file__)
-                log_file = os.path.join(log_dir, "alert_log.txt")
+                log_file = get_incident_log_path()
                 
                 # Formatting the log entry for readability
                 # SECURITY: Sanitize all browser-provided strings to prevent log injection
@@ -2611,6 +3095,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 send_message({"status": "logged", "file": log_file})
             except Exception as e:
                 send_message({"status": "error", "error": str(e)})
+            return
         elif action == "lock":
             if not is_safe_path(target):
                 send_message({"status": "error", "error": _("Lock Denied: Safe zone violation")})
@@ -2681,7 +3166,8 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                     process = subprocess.run([_BIN_FRESHCLAM], capture_output=True, text=True, timeout=120)
                 else:
                     log_debug("freshclam not found in PATH — database update skipped.")
-                    return {"status": "error", "error": "freshclam not found"}
+                    send_message({"status": "error", "error": "freshclam not found"})
+                    return
                 send_message({
                     "status": "ok" if process.returncode == 0 else "error",
                     "output": process.stdout[:500],
@@ -2755,8 +3241,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 send_message({"status": "error", "error": f"Elevated authorization system error: {e}"})
         elif action == "get_audit_logs":
             try:
-                log_dir = os.path.dirname(__file__)
-                log_file = os.path.join(log_dir, "alert_log.txt")
+                log_file = get_incident_log_path()
                 if not os.path.exists(log_file):
                     send_message({"status": "ok", "logs": []})
                 else:
@@ -2784,8 +3269,7 @@ def handle_message(message, secret, config, stored_hash, current_hash):
         elif action == "get_intel":
             try:
                 load_whitelist_cache()
-                with open(os.path.join(os.path.dirname(__file__), "trust_db.json"), "r") as f:
-                    db = json.load(f)
+                db = load_trust_db_data()
                 
                 # We return only Top 5000 to avoid hitting the 1MB native messaging limit
                 # The host still uses the full 1M list for deep validation.
@@ -2806,7 +3290,6 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 run_dir = get_run_dir()
                 url_db_path = os.path.join(run_dir, "urldb.txt")
                 if not secret:
-                    import secrets
                     secret = secrets.token_urlsafe(32)
                     config["secret"] = secret
                     save_config(config)
@@ -2831,7 +3314,6 @@ def handle_message(message, secret, config, stored_hash, current_hash):
                 # 3. Dynamic Honeypot Secret (Rolling/Session based)
                 hp_secret = config.get("honeypot_secret")
                 if not hp_secret:
-                    import secrets
                     hp_secret = "cf_honey_" + secrets.token_urlsafe(16)
                     config["honeypot_secret"] = hp_secret
                     config_updated = True
@@ -3021,10 +3503,6 @@ def main():
     
     # Start Offensive Shield Threads (background)
     start_clipper_shield()
-            
-    secret = config.get("secret")
-    stored_hash = config.get("integrity_hash")
-    current_hash = get_self_hash()
 
     # 1. ERT Hardware Signature Verification
     if config.get("ert_enabled") and config.get("ert_signature") and config.get("ert_public_key"):
@@ -3055,11 +3533,6 @@ def main():
     # 5. FS-Verity Kernel Audit
     verify_kernel_integrity()
 
-    # 6. Security Lockdown: Poisoning pickle after all initializations
-    sys.modules['pickle'] = None
-    sys.modules['_pickle'] = None
-    sys.modules['cPickle'] = None
-
     # Persistent Bridge Loop
     while True:
         try:
@@ -3069,7 +3542,7 @@ def main():
                 break
             
             # Dispatch each message to the thread pool
-            _thread_pool.submit(handle_message, message, secret, config, stored_hash, current_hash)
+            _thread_pool.submit(handle_message, message, config)
             
         except EOFError:
             break

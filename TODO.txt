@@ -2,6 +2,7 @@
 
 ### 2. CRYPTOGRAPHIC HARDENING
 - [ ] Implement runtime integrity checksums for all loaded `.py` modules. The bridge will re-verify its own code-segment hashes at random intervals to detect "Hot-Patching" or memory injection.
+- [ ] Migrate all ClamFox private-key operations to TPM-backed non-exportable keys (persistent signing key + sealed symmetric material), with one-time keyring migration, rollback-safe fallback policy, and public-key continuity handling in extension trust flow.
 
 ### 3. ADVANCED DEFENSE-IN-DEPTH (Hardening)
 - [ ] Rewrite critical Native Messaging and TPM unsealing logic in Rust to eliminate memory-safety vulnerabilities (buffer overflows, use-after-free) inherent in high-performance C/Python glue.(tough one)

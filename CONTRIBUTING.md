@@ -38,7 +38,7 @@ Security-Sensitive Changes
 
 If your change touches any of these areas, open an issue first to discuss the approach:
 Native messaging protocol or handshake.
-Cryptographic key generation or TPM integration in host/tpm_provider.py and host/ert_signer.py.
+Cryptographic key generation or TPM integration in host/tpmprovider.py and host/ertsigner.py.
 WASM shield code in wasm-shield/src/lib.rs.
 Signature hydration or update logic in update_intelligence().
 Content Security Policy or manifest permissions.

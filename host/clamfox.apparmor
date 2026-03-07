@@ -61,9 +61,9 @@
   /tmp/clamfox_* rw,
   /tmp/clamfox_*/** rw,
 
-  # Allow reading files in common download/temp areas for scanning
-  /home/*/Downloads/ r,
-  /home/*/Downloads/** r,
+  # Allow scan-time lock/unlock (chmod) and quarantine moves in Downloads
+  /home/*/Downloads/ rw,
+  /home/*/Downloads/** rwk,
   /home/*/.clamfox_host.log w,
   /tmp/** rwk,
   /var/tmp/** rwk,
