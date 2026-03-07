@@ -44,6 +44,9 @@ clamfox_amo_*/
 clamfox_amo_0.0.4.5/
 
 # Test files
+integration_tests.py
+test_security_suite.js
+test_security_suite.py
 eicar_test.txt
 da974eebe6414d4987d9*.xpi
 da974eebe6414d4987d9*.zip
