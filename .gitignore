@@ -13,6 +13,9 @@ host/tpm_debug.err
 host/decode_log.py
 *.log
 .clamfox_host.log
+__pycache__/
+.pytest_cache/
+.venv/
 
 # TPM / ERT Keyfiles & Signatures (machine-specific, generated at install time)
 host/vault_sealed_priv.bin
