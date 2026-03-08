@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup System Dependencies
         run: |
@@ -32,7 +32,7 @@ jobs:
           sha256sum clamfox_full_*.zip clamfox_amo_source_*.zip clamfox_full_*.xpi clamfox_standalone_*.xpi > SHA256SUMS.txt
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           files: |
             clamfox_full_*.zip

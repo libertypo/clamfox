@@ -26,10 +26,18 @@ function testRulesUniqueness() {
 
 function testBlockingGuardPresent() {
   const bg = read('background.js');
-  assert(bg.includes('browser.webRequest.onBeforeRequest.addListener(mainFrameRequestGuard, MAIN_FRAME_FILTER, ["blocking"])'),
-    'main-frame blocking guard registration missing');
-  assert(bg.includes('const SAFE_BROWSING_ERROR_PATTERNS = ['),
-    'safe-browsing handoff pattern list missing');
+
+  const registrationRe = /webRequest\.onBeforeRequest\.addListener\(\s*mainFrameRequestGuard\s*,\s*MAIN_FRAME_FILTER\s*,\s*\[\s*"blocking"\s*\]\s*\)/m;
+  assert(registrationRe.test(bg), 'main-frame blocking guard registration missing or malformed');
+
+  const guardStart = bg.indexOf('const mainFrameRequestGuard = async (details) => {');
+  const guardEnd = bg.indexOf('const MAIN_FRAME_FILTER =', guardStart);
+  assert(guardStart >= 0 && guardEnd > guardStart, 'mainFrameRequestGuard function boundaries not found');
+  const guardBody = bg.slice(guardStart, guardEnd);
+
+  assert(guardBody.includes('return { cancel: true };'), 'mainFrameRequestGuard lacks explicit cancel path');
+  assert(guardBody.includes('handleMaliciousUrl('), 'mainFrameRequestGuard lacks malicious redirect handler path');
+  assert(bg.includes('const SAFE_BROWSING_ERROR_PATTERNS = ['), 'safe-browsing handoff pattern list missing');
 }
 
 function main() {

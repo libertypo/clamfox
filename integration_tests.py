@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import json
+import re
 import unittest
 
 
@@ -42,6 +43,26 @@ class IntegrationSecurityHarness(unittest.TestCase):
         self.assertIn("run: node test_security_suite.js", wf)
         self.assertIn("run: python integration_tests.py", wf)
         self.assertNotIn("hashFiles(", wf)
+
+    def test_workflow_actions_are_sha_pinned(self) -> None:
+        workflows = [
+            ROOT / ".github/workflows/security-tests.yml",
+            ROOT / ".github/workflows/codeql.yml",
+            ROOT / ".github/workflows/release.yml",
+        ]
+        uses_re = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
+        sha_pinned_re = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
+
+        for wf_path in workflows:
+            wf = wf_path.read_text(encoding="utf-8")
+            uses_values = uses_re.findall(wf)
+            self.assertGreater(len(uses_values), 0, f"no uses entries found in {wf_path.name}")
+            for value in uses_values:
+                self.assertRegex(
+                    value,
+                    sha_pinned_re,
+                    f"workflow action not SHA pinned in {wf_path.name}: {value}",
+                )
 
     def test_release_workflow_publishes_checksums(self) -> None:
         wf = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
