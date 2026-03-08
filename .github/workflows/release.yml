@@ -27,6 +27,10 @@ jobs:
           # Run the existing packaging script
           bash package.sh
 
+      - name: Generate SHA256 Checksums
+        run: |
+          sha256sum clamfox_full_*.zip clamfox_amo_source_*.zip clamfox_full_*.xpi clamfox_standalone_*.xpi > SHA256SUMS.txt
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -35,6 +39,7 @@ jobs:
             clamfox_amo_source_*.zip
             clamfox_full_*.xpi
             clamfox_standalone_*.xpi
+            SHA256SUMS.txt
           generate_release_notes: true
           draft: false
           prerelease: false

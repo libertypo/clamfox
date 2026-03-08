@@ -24,13 +24,10 @@ jobs:
           node-version: '20'
 
       - name: Run Python Security Suite
-        if: ${{ hashFiles('test_security_suite.py') != '' }}
         run: python test_security_suite.py
 
       - name: Run JS Security Suite
-        if: ${{ hashFiles('test_security_suite.js') != '' }}
         run: node test_security_suite.js
 
       - name: Run CVE Catalog Regression Harness
-        if: ${{ hashFiles('integration_tests.py') != '' }}
         run: python integration_tests.py

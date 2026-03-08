@@ -1,7 +1,6 @@
 // Security: Set to false in production to prevent internal state leaking to DevTools
 const DEBUG = false;
 const dbg = (...args) => { if (DEBUG) console.log(...args); };
-const STRICT_SIGNATURE_ENFORCEMENT = true;
 
 // Supply-Chain Canary (Injected at build time)
 const CLAMFOX_CANARY = "PLACEHOLDER_CANARY";
@@ -1856,6 +1855,9 @@ async function performScan(target, type, downloadId = null, tabId = null, locked
                 // SECURITY HARDENING: Release it from the quarantine directory into the user's view
                 try {
                     const secret = await getSecret();
+                    if (!secret || !HOST_AVAILABLE) {
+                        throw new Error("Security engine unavailable during clean release");
+                    }
                     const releaseResp = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
                         action: "release_quarantine",
                         target: target,
@@ -1863,8 +1865,13 @@ async function performScan(target, type, downloadId = null, tabId = null, locked
                     }, 5000);
                     if (releaseResp && releaseResp.status === "ok") {
                         lockActive = false;
+                    } else {
+                        throw new Error((releaseResp && releaseResp.error) ? releaseResp.error : "release_quarantine returned non-ok status");
                     }
-                } catch (e) { }
+                } catch (e) {
+                    notifyError("Clean verdict received, but file release failed. Attempting lock recovery.");
+                    await recoverLockedFile("clean verdict release failure");
+                }
 
                 setTimeout(() => browser.action.setBadgeText({ text: "" }), 5000);
             } else if (type === "file" && (response.status === "error" || response.status === "missing")) {

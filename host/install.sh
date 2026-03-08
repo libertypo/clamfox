@@ -143,7 +143,7 @@ if [ -d "$DIR/locales" ]; then
 fi
 if [ -d "$DIR/signatures" ]; then
     # Security: Clean up stale/legacy signatures in target
-    rm -f "$INSTALL_DIR/signatures/"*.old "$INSTALL_DIR/signatures/"*.tmp
+    find "$INSTALL_DIR/signatures" -maxdepth 1 -type f \( -name "*.old" -o -name "*.tmp" \) -delete
 
     # 🛡️ Stale Maldet Check: .hdb/.ndb files are XOR-scrambled with a machine-specific
     # key at download time. A reinstall on the same or different machine may have
@@ -159,10 +159,6 @@ if [ -d "$DIR/signatures" ]; then
             rm -f "$stale_sig"
         fi
     done
-
-    # Also remove any scrambled .hdb/.ndb from the SOURCE directory before copying
-    # (they must only be created at runtime by the host's update_intelligence function)
-    rm -f "$DIR/signatures/"*.hdb "$DIR/signatures/"*.ndb
 
     cp -r "$DIR/signatures/"* "$INSTALL_DIR/signatures/"
 fi
