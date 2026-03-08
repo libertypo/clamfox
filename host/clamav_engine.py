@@ -635,44 +635,78 @@ def get_message():
 def is_safe_path(filepath):
     """
     Robust Path Traversal Protection.
-    Ensures that any file path handled by the Native Host is within a strictly 
+    Ensures that any file path handled by the Native Host is within a strictly
     whitelisted set of 'Safe Zones'. Uses recursive boundary checking to prevent
     symlink-based escapes.
     """
-    if not filepath: return False
+    if not filepath:
+        return False
     try:
         # 1. Expand ~ and get absolute path
         abs_path = os.path.abspath(os.path.expanduser(filepath))
         # 2. Resolve all symlinks to prevent symlink-to-system-file attacks (Recursive check)
         real_path = os.path.realpath(abs_path)
-        
-        # 3. Define the 'Safe Zones'
-        # - Temporary storage (Downloads, /tmp, /dev/shm)
-        # - The host's own directory (for signatures, logs, quarantine)
+
+        # 3. Define tightly scoped 'Safe Zones'
+        # - Temporary work areas and quarantine
+        # - Explicit download directories
+        # - Host runtime directory only
+        home_dir = os.path.expanduser("~")
+        downloads_roots = [
+            os.path.join(home_dir, "Downloads"),
+            os.path.join(home_dir, "Scaricati"),
+        ]
+
+        xdg_dirs = os.path.join(home_dir, ".config", "user-dirs.dirs")
+        if os.path.exists(xdg_dirs):
+            try:
+                with open(xdg_dirs, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line.startswith("XDG_DOWNLOAD_DIR="):
+                            continue
+                        value = line.split("=", 1)[1].strip().strip('"')
+                        value = value.replace("$HOME", home_dir)
+                        if value:
+                            downloads_roots.append(os.path.expanduser(value))
+                        break
+            except Exception:
+                pass
+
         safe_roots = [
             tempfile.gettempdir(),
             "/dev/shm",
-            os.path.expanduser("~"),
-            os.path.dirname(__file__)
-        ]
-        
-        # 4. Enforce strict boundaries for resolved paths
+            _QUARANTINE_DIR,
+            os.path.dirname(__file__),
+        ] + downloads_roots
+
+        # Normalize and deduplicate roots while dropping non-existent paths
+        normalized_roots = []
+        seen_roots = set()
         for root in safe_roots:
-            root_abs = os.path.realpath(os.path.abspath(root))
+            if not root:
+                continue
+            root_abs = os.path.realpath(os.path.abspath(os.path.expanduser(root)))
+            if not os.path.exists(root_abs):
+                continue
+            if root_abs in seen_roots:
+                continue
+            seen_roots.add(root_abs)
+            normalized_roots.append(root_abs)
+
+        # 4. Enforce strict boundaries for resolved paths
+        for root_abs in normalized_roots:
             if os.path.commonpath([root_abs, real_path]) == root_abs:
-                # 🛡️ Additional check: no suspicious parent traversal in final resolved path
-                # Although realpath resolves '..', we reject any attempt to move into 
-                # root-level directories (e.g. /etc, /bin) via symlink escapes.
+                # Although realpath resolves '..', we reject exact root scans.
                 if real_path == root_abs:
-                    # Allowing the root itself is usually not intended for scanning
                     return False
-                
-                # Minimum depth check: prevent scanning the literal /tmp or ~ themselves
+
+                # Minimum depth check: prevent scanning the literal /tmp, /dev/shm, etc.
                 if real_path.count(os.sep) < 2:
                     return False
-                    
+
                 return True
-                
+
         log_debug(f"🚨 SECURITY ALERT: Blocked Path Traversal attempt to: {filepath} (Resolved: {real_path})")
         return False
     except Exception as e:

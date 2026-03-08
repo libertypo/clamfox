@@ -273,20 +273,35 @@ chmod 644 "$INSTALL_DIR/clamfox.xpi"
 
 POLICY_DIR="/etc/firefox/policies"
 mkdir -p "$POLICY_DIR"
+POLICY_FILE="$POLICY_DIR/policies.json"
 
-cat <<EOF > "$POLICY_DIR/policies.json"
-{
-  "policies": {
-    "ExtensionSettings": {
-      "clamfox@ovidio.me": {
-        "installation_mode": "normal_installed",
-        "install_url": "file:///opt/clamfox/clamfox.xpi"
-      }
-    }
-  }
+python3 - <<PYEOF
+import json
+import os
+
+path = "$POLICY_FILE"
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+
+policies = data.setdefault("policies", {})
+ext_settings = policies.setdefault("ExtensionSettings", {})
+ext_settings["clamfox@ovidio.me"] = {
+    "installation_mode": "normal_installed",
+    "install_url": "file:///opt/clamfox/clamfox.xpi"
 }
-EOF
 
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.replace(tmp, path)
+PYEOF
+chmod 644 "$POLICY_FILE"
 # 8.5 Initial YARA Signature Sync
 echo "📡 Syncing YARA community rules (background, may take a moment)..."
 YARA_URL="https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-core.zip"

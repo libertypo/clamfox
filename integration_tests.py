@@ -26,6 +26,14 @@ class IntegrationSecurityHarness(unittest.TestCase):
         manifest_amo = json.loads((ROOT / "manifest_amo.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest.get("version"), manifest_amo.get("version"), "manifest versions diverged")
 
+    def test_manifest_csp_is_aligned(self) -> None:
+        manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
+        manifest_amo = json.loads((ROOT / "manifest_amo.json").read_text(encoding="utf-8"))
+        csp_main = manifest.get("content_security_policy", {}).get("extension_pages", "")
+        csp_amo = manifest_amo.get("content_security_policy", {}).get("extension_pages", "")
+        self.assertIn("frame-src 'none'", csp_main)
+        self.assertIn("frame-src 'none'", csp_amo)
+
     def test_security_workflow_runs_hard_gate_steps(self) -> None:
         wf = (ROOT / ".github/workflows/security-tests.yml").read_text(encoding="utf-8")
 
@@ -43,6 +51,11 @@ class IntegrationSecurityHarness(unittest.TestCase):
         self.assertIn("run: node test_security_suite.js", wf)
         self.assertIn("run: python integration_tests.py", wf)
         self.assertNotIn("hashFiles(", wf)
+
+    def test_security_workflow_has_least_privilege_and_timeout(self) -> None:
+        wf = (ROOT / ".github/workflows/security-tests.yml").read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read", wf)
+        self.assertIn("timeout-minutes: 15", wf)
 
     def test_workflow_actions_are_sha_pinned(self) -> None:
         workflows = [
@@ -78,6 +91,17 @@ class IntegrationSecurityHarness(unittest.TestCase):
         install = (ROOT / "host/install.sh").read_text(encoding="utf-8")
         self.assertIn('for f in "$INSTALL_DIR/clamav_host.py" "$INSTALL_DIR/tpm_provider.py" "$INSTALL_DIR/yara_sanitizer.py"; do', install)
         self.assertNotIn('for f in "$INSTALL_DIR/clamav_engine.py" "$INSTALL_DIR/tpm_provider.py" "$INSTALL_DIR/yara_sanitizer.py"; do', install)
+
+    def test_install_script_merges_firefox_policy(self) -> None:
+        install = (ROOT / "host/install.sh").read_text(encoding="utf-8")
+        self.assertIn('POLICY_FILE="$POLICY_DIR/policies.json"', install)
+        self.assertIn('data = json.load', install)
+        self.assertIn('os.replace(tmp, path)', install)
+        self.assertNotIn('cat <<EOF > "$POLICY_DIR/policies.json"', install)
+
+    def test_host_manifest_uses_hardened_install_path(self) -> None:
+        host_manifest = json.loads((ROOT / "host/clamav_host.json").read_text(encoding="utf-8"))
+        self.assertEqual(host_manifest.get("path"), "/opt/clamfox/clamav_host.py")
 
 
 if __name__ == "__main__":
