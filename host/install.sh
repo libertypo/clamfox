@@ -229,7 +229,7 @@ chown root:root "$CANARY_FILE"
 # 5.6 FS-Verity Kernel Integrity (Optional/Opportunistic)
 if command -v fsverity >/dev/null 2>&1; then
     echo "🛡️  FS-VERITY: Detecting Kernel support for Immutability..."
-    for f in "$INSTALL_DIR/clamav_engine.py" "$INSTALL_DIR/tpm_provider.py" "$INSTALL_DIR/yara_sanitizer.py"; do
+    for f in "$INSTALL_DIR/clamav_host.py" "$INSTALL_DIR/tpm_provider.py" "$INSTALL_DIR/yara_sanitizer.py"; do
         if [ -f "$f" ]; then
              fsverity enable "$f" 2>/dev/null && echo "   [OK] Kernel-level lock active for $(basename "$f")" || echo "   [SKIP] Storage/Kernel does not support verity for $(basename "$f")"
         fi
