@@ -19,6 +19,9 @@ XPI_STANDALONE="clamfox_standalone_${VERSION}.xpi"
 
 echo "Packaging ClamFox..."
 
+# Remove previously generated versioned extension artifacts so only fresh output remains.
+rm -f clamfox_full_*.xpi clamfox_standalone_*.xpi
+
 # Cleanup
 rm -f "$FULL_PACKAGE" "$AMO_SOURCE" "$XPI_FULL" "$XPI_STANDALONE"
 rm -rf build_full build_amo build_xpi_full build_xpi_standalone

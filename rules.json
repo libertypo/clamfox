@@ -104,5 +104,31 @@
                 "localhost"
             ]
         }
+    },
+    {
+        "id": 1001,
+        "priority": 10,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "regexFilter": "^https?://(www\\.)?wicar\\.org/(data/|test-malware)",
+            "resourceTypes": [
+                "main_frame"
+            ]
+        }
+    },
+    {
+        "id": 1002,
+        "priority": 10,
+        "action": {
+            "type": "block"
+        },
+        "condition": {
+            "regexFilter": "^https?://(www\\.)?eicar\\.org/.*/download",
+            "resourceTypes": [
+                "main_frame"
+            ]
+        }
     }
 ]

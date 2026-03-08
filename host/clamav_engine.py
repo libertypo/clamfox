@@ -332,6 +332,10 @@ import base64
 
 _MACHINE_KEY_CACHE = None
 
+def _machine_key_fallback_path():
+    cfg_dir = os.path.expanduser("~/.config/clamfox")
+    return os.path.join(cfg_dir, "machine_private_key.pem")
+
 def get_or_create_machine_key():
     """
     Retrieve or Generate a machine-unique EC-DSA (P-256) Private Key.
@@ -354,6 +358,22 @@ def get_or_create_machine_key():
             except Exception:
                 log_debug("CORRUPTION: Keyring key invalid, regenerating...")
 
+        # Fallback persistence for environments without keyring/session DBus.
+        # Native messaging may spawn a fresh host process per request; without
+        # stable key storage, signatures become unverifiable across calls.
+        fallback_path = _machine_key_fallback_path()
+        if os.path.exists(fallback_path):
+            try:
+                with open(fallback_path, "rb") as f:
+                    pem_bytes = f.read()
+                _MACHINE_KEY_CACHE = serialization.load_pem_private_key(
+                    pem_bytes,
+                    password=None
+                )
+                return _MACHINE_KEY_CACHE
+            except Exception:
+                log_debug("CORRUPTION: Fallback machine key invalid, regenerating...")
+
         # Generate new P-256 Keypair
         private_key = ec.generate_private_key(ec.SECP256R1())
         pem = private_key.private_bytes(
@@ -362,8 +382,17 @@ def get_or_create_machine_key():
             encryption_algorithm=serialization.NoEncryption()
         )
         
-        # Store in Keyring
-        keyring_set("machine_private_key", pem.decode('utf-8'))
+        # Store in keyring when available, otherwise persist in user config.
+        stored_in_keyring = keyring_set("machine_private_key", pem.decode('utf-8'))
+        if not stored_in_keyring:
+            try:
+                cfg_dir = os.path.dirname(fallback_path)
+                os.makedirs(cfg_dir, mode=0o700, exist_ok=True)
+                with open(fallback_path, "wb") as f:
+                    f.write(pem)
+                os.chmod(fallback_path, 0o600)
+            except Exception as key_file_err:
+                log_debug(f"Fallback machine key persist failed: {key_file_err}")
 
         # Cache key immediately so optional audit artifacts cannot break signing.
         _MACHINE_KEY_CACHE = private_key
@@ -673,9 +702,13 @@ def send_message(message_content):
                 # Sign all response fields except _signature itself.
                 # This covers security metadata (e.g., _signed_at/_pubkey_hint)
                 # so they cannot be altered without invalidating the signature.
+                # Canonical compact JSON avoids spacing/serializer drift with
+                # browser-side signature verification logic.
                 response_data = json.dumps(
                     {k: v for k, v in message_content.items() if k != "_signature"},
-                    sort_keys=True
+                    sort_keys=True,
+                    separators=(',', ':'),
+                    ensure_ascii=False
                 )
 
                 # Sign with EC-DSA (P-256, SHA-256)
@@ -2539,8 +2572,27 @@ def check_url_reputation(url):
         target_lower = target.lower()
         
         # A. Testing Payloads
-        if "wicar.org" in target_lower or "/eicar.com" in target_lower or "eicar.org/download" in target_lower:
-            return {"status": "malicious", "threat": _("Testing Payload (Safe Simulated Threat)"), "url": target}
+        # Treat deterministic test feeds as confirmed so browser-side pre-scan
+        # logic blocks immediately (instead of deferring to content scan only).
+        try:
+            parsed_test = urlparse(target)
+            host_test = (parsed_test.netloc or "").lower()
+            path_test = (parsed_test.path or "").lower()
+            is_wicar_test = host_test in ["wicar.org", "www.wicar.org"] and (
+                path_test.startswith("/data/") or "/test-malware" in path_test
+            )
+            is_eicar_test = host_test in ["eicar.org", "www.eicar.org"] and "/download" in path_test
+        except Exception:
+            is_wicar_test = False
+            is_eicar_test = False
+
+        if is_wicar_test or is_eicar_test or "/eicar.com" in target_lower:
+            return {
+                "status": "malicious",
+                "threat": _("Testing Payload (Safe Simulated Threat)"),
+                "url": target,
+                "confirmed": True
+            }
 
         # B. Homograph Attack Detection (Heuristic)
         is_homograph, reason = check_homograph_attack(target)
@@ -3327,13 +3379,13 @@ def handle_message(message, config):
                 tor_active, __ = check_tor_reachable()
                 log_debug("Check: Privacy Check done.")
 
-                url_db_mtime = os.path.getmtime(url_db_path) if os.path.exists(url_db_path) else None
+                url_db_mtime = int(os.path.getmtime(url_db_path)) if os.path.exists(url_db_path) else None
                 phish_db_path = os.path.join(run_dir, "phishdb.txt")
-                phish_db_mtime = os.path.getmtime(phish_db_path) if os.path.exists(phish_db_path) else None
+                phish_db_mtime = int(os.path.getmtime(phish_db_path)) if os.path.exists(phish_db_path) else None
                 
                 sig_dir = os.path.join(os.path.dirname(__file__), "signatures")
                 yara_canary = os.path.join(sig_dir, "yara-rules-core.yar")
-                yara_mtime = os.path.getmtime(yara_canary) if os.path.exists(yara_canary) else None
+                yara_mtime = int(os.path.getmtime(yara_canary)) if os.path.exists(yara_canary) else None
 
                 version_info = "Unknown"
                 if installed:
@@ -3342,12 +3394,12 @@ def handle_message(message, config):
                         version_info = v_res.stdout.strip()
                     except Exception: pass
 
-                # SECURITY: Atomically decide whether to include the real secret.
-                # We hold the lock while checking AND flipping the flag so that
-                # two concurrent 'check' dispatches cannot both see _secret_issued=False.
+                # SECURITY: Re-issue secret when caller does not present the current one.
+                # This allows extension/background restarts to recover without requiring
+                # host process restart, while still avoiding needless re-issuance when
+                # caller already proves possession of the active secret.
                 with _secret_issued_lock:
-                    should_emit_secret = (not _secret_issued and
-                                          (not received_secret or received_secret != secret))
+                    should_emit_secret = (not received_secret or received_secret != secret)
                     if should_emit_secret:
                         _secret_issued = True
 
@@ -3367,7 +3419,7 @@ def handle_message(message, config):
                     "env_ok": verify_environment(),
                     "install_cmd": dist_info["install"],
                     "optimize_cmd": dist_info["optimize"],
-                    "db_last_update": get_db_last_update(),
+                    "db_last_update": int(get_db_last_update()) if get_db_last_update() else None,
                     "url_db_last_update": url_db_mtime,
                     "phish_db_last_update": phish_db_mtime,
                     "yara_last_update": yara_mtime,

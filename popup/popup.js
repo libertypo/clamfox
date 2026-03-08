@@ -155,15 +155,12 @@ async function forceUpdateYaraDb() {
 }
 
 async function initSettings() {
-    const freqSlider = document.getElementById('scan-freq-slider');
-    const freqValue = document.getElementById('freq-value');
     const mbToggle = document.getElementById('mb-toggle');
     const puaToggle = document.getElementById('pua-toggle');
     const ramToggle = document.getElementById('ram-toggle');
 
     // Load saved settings
     const settings = await browser.storage.local.get({
-        scanFrequencyMB: 10,
         useMB: true,
         puaEnabled: true,
         ramMode: true,
@@ -176,8 +173,6 @@ async function initSettings() {
         strictMode: true
     });
 
-    freqSlider.value = settings.scanFrequencyMB;
-    freqValue.textContent = settings.scanFrequencyMB;
     mbToggle.checked = settings.useMB;
     puaToggle.checked = settings.puaEnabled;
     ramToggle.checked = settings.ramMode;
@@ -189,14 +184,6 @@ async function initSettings() {
             browser.storage.local.set({ remindersEnabled: reminderToggle.checked });
         });
     }
-
-    // Save on change
-    freqSlider.addEventListener('input', () => {
-        freqValue.textContent = freqSlider.value;
-        const hint = document.querySelector('[data-i18n="frequencyHint"]');
-        if (hint) hint.textContent = browser.i18n.getMessage("frequencyHint", [freqSlider.value]);
-        browser.storage.local.set({ scanFrequencyMB: parseInt(freqSlider.value) });
-    });
 
     mbToggle.addEventListener('change', () => {
         browser.storage.local.set({ useMB: mbToggle.checked });
@@ -759,34 +746,6 @@ async function renderBlockHistory() {
             info.appendChild(verdict);
             info.appendChild(details);
 
-            const inferredSourceStage = block.block_stage === 'source' ||
-                (!block.block_stage && typeof block.reason === 'string' && block.reason.includes('Download Pre-Scan'));
-
-            if (inferredSourceStage && typeof block.url === 'string' && block.url) {
-                const allowBtn = document.createElement('button');
-                allowBtn.className = 'mini-btn allow-once-btn';
-                allowBtn.textContent = 'Allow once (10m)';
-                allowBtn.addEventListener('click', async (ev) => {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    allowBtn.disabled = true;
-                    const original = allowBtn.textContent;
-                    allowBtn.textContent = 'Granting...';
-                    try {
-                        const res = await browser.runtime.sendMessage({ action: 'allow_once_download', url: block.url });
-                        if (res && res.status === 'ok') {
-                            allowBtn.textContent = 'Allowed once';
-                        } else {
-                            allowBtn.disabled = false;
-                            allowBtn.textContent = original;
-                        }
-                    } catch (e) {
-                        allowBtn.disabled = false;
-                        allowBtn.textContent = original;
-                    }
-                });
-                info.appendChild(allowBtn);
-            }
             item.appendChild(info);
 
             // Click to view forensics
@@ -920,38 +879,9 @@ function showForensics(block) {
     reportBtn.dataset.time = block.time;
     reportBtn.dataset.forensics = JSON.stringify(block.forensics || {});
 
-    // Ensure a one-time allow action is visible in forensic view for source-stage blocks.
     const existingAllowBtn = document.getElementById('allow-once-forensic-btn');
     if (existingAllowBtn) {
         existingAllowBtn.remove();
-    }
-
-    const inferredSourceStage = block.block_stage === 'source' ||
-        (!block.block_stage && typeof block.reason === 'string' && (block.reason.includes('Download Pre-Scan') || block.reason.includes('Malicious Link')));
-
-    if (actions && inferredSourceStage && typeof block.url === 'string' && block.url) {
-        const allowBtn = document.createElement('button');
-        allowBtn.id = 'allow-once-forensic-btn';
-        allowBtn.className = 'mini-btn allow-once-btn';
-        allowBtn.textContent = 'Allow once (10m)';
-        allowBtn.addEventListener('click', async () => {
-            const original = allowBtn.textContent;
-            allowBtn.disabled = true;
-            allowBtn.textContent = 'Granting...';
-            try {
-                const res = await browser.runtime.sendMessage({ action: 'allow_once_download', url: block.url });
-                if (res && res.status === 'ok') {
-                    allowBtn.textContent = 'Allowed once';
-                } else {
-                    allowBtn.disabled = false;
-                    allowBtn.textContent = original;
-                }
-            } catch (e) {
-                allowBtn.disabled = false;
-                allowBtn.textContent = original;
-            }
-        });
-        actions.appendChild(allowBtn);
     }
 }
 
