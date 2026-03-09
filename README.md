@@ -15,6 +15,18 @@ ClamFox is designed around a native-host architecture.
 The Firefox extension provides browser-side shields.
 The ClamFox Native Bridge enables ClamAV scanning, file locking, and host-backed intelligence workflows.
 
+WASM Shield
+
+ClamFox also includes a WebAssembly (WASM) module (`wasm_shield/clamfox_shield.wasm`) used as a fast in-browser pre-scan engine.
+It is compiled from Rust sources in `wasm-shield/` and loaded by `background.js` at startup.
+Because it runs inside the Firefox extension sandbox, it belongs to the extension build/package pipeline (not native host installation).
+
+What it does:
+- Performs homograph detection (for example, punycode and suspicious non-ASCII domain patterns).
+- Performs statistical DGA-style detection (entropy, digit density, and consonant density heuristics).
+- Runs these checks before native-host URL reputation lookups to reduce latency for obvious threats.
+- Verifies WASM integrity using a SHA-256 hash injected at packaging time; if integrity fails, the WASM path is disabled and ClamFox falls back to native checks.
+
 
 Requirements
 
@@ -36,6 +48,8 @@ cd host && ./install.sh
 
 Optional. Build the WASM shield from source:
 ./build_wasm.sh
+
+Note: this step is for extension artifacts. `host/install.sh` does not compile WASM.
 
 Package for distribution:
 ./package.sh
