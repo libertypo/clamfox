@@ -1,4 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 # Script to package the extension
+umask 022
+export LC_ALL=C
+export TZ=UTC
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}"
+
 VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -n1)
 AMO_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' manifest_amo.json | head -n1)
 
@@ -122,7 +130,7 @@ cd build_xpi_full && zip -r "../$XPI_FULL" ./* && cd ..
 
 # 4. Create Source Zip for AMO (Required for review)
 mkdir -p build_amo
-cp -r background.js content.js content.css design_tokens.css manifest.json manifest_amo.json popup icons _locales host data wasm_shield wasm-shield README.md PRIVACY_SUMMARY.txt package.sh build_amo/
+cp -r background.js content.js content.css design_tokens.css manifest.json manifest_amo.json popup icons _locales host data wasm_shield wasm-shield README.md PRIVACY_SUMMARY.txt AMO_REVIEW_NOTES.md package.sh build_amo/
 rm -f build_amo/host/config.json build_amo/host/host_debug.log build_amo/host/alert_log.txt build_amo/host/tpm_debug.err
 rm -f build_amo/host/urldb.txt* build_amo/host/trust_db.json
 rm -f build_amo/host/vault_sealed_priv.bin build_amo/host/vault_sealed_pub.bin

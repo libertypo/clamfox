@@ -20,11 +20,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zip
 
+      - name: Release Preflight
+        run: |
+          chmod +x scripts/critical_invariants.sh scripts/local_hygiene.sh
+          ./scripts/critical_invariants.sh
+          ./scripts/local_hygiene.sh
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "ERROR: release workflow requires a clean tree before build"
+            git status --short
+            exit 1
+          fi
+
       - name: Build Packages (XPIs and ZIPs)
         run: |
-          # Give script execution permission just in case
           chmod +x package.sh
-          # Run the existing packaging script
           bash package.sh
 
       - name: Generate SHA256 Checksums

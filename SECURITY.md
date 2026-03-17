@@ -59,3 +59,22 @@ Signature databases and machine keys are generated at runtime and are not commit
 Known Limitations
 
 See TODO.txt for open hardening items including runtime integrity checksums and native IPC hardening roadmap.
+
+Operational Best Practices
+
+Security-critical CI gates.
+Critical invariants run first in `.github/workflows/security-tests.yml`.
+Extended regression jobs depend on the critical gate.
+
+Release hygiene.
+Use `scripts/local_hygiene.sh` before packaging to remove local runtime artifacts safely.
+
+Fail-closed cryptography.
+The native host bridge must not emit unsigned responses.
+Startup fails fast if machine signing key provisioning is unavailable.
+
+Structured observability.
+High-signal host failures include stable `error_code` values for troubleshooting without exposing sensitive data.
+
+Reproducible release discipline.
+Use `SECURITY_RELEASE_CHECKLIST.md` before tagging releases.

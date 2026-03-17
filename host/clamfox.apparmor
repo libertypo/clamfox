@@ -61,9 +61,14 @@
   /tmp/clamfox_* rw,
   /tmp/clamfox_*/** rw,
 
-  # Allow scan-time lock/unlock (chmod) and quarantine moves in Downloads
+  # Allow scan-time lock/unlock and staging for common download paths.
   /home/*/Downloads/ rw,
   /home/*/Downloads/** rwk,
+  /home/*/Scaricati/ rw,
+  /home/*/Scaricati/** rwk,
+  /home/*/.clamfox_quarantine/ rw,
+  /home/*/.clamfox_quarantine/** rwk,
+  /run/user/[0-9]*/doc/** r,
   /home/*/.clamfox_host.log w,
   /tmp/** rwk,
   /var/tmp/** rwk,
@@ -97,4 +102,7 @@
   deny /etc/** w,
   deny /home/*/.ssh/** rw,
   deny /home/*/.gnupg/** rw,
+  deny /home/*/.pki/** rw,
+  deny /home/*/.local/share/keyrings/** rw,
+  deny /home/*/.mozilla/** rw,
 }

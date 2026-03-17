@@ -381,6 +381,15 @@
     "suppressTrustedToastsHint": {
         "message": "Smetti di mostrare notifiche toast sui marchi ufficiali e sui domini in whitelist"
     },
+    "forceDownloadLabel": {
+        "message": "Forza download prima della scansione"
+    },
+    "forceDownloadHint": {
+        "message": "Impedisci l'apertura inline di PDF/ODF/Office e imponi un flusso di download sicuro"
+    },
+    "downloadsFolderOnlyWarning": {
+        "message": "I download sono consentiti solo nella cartella Download."
+    },
     "clearHistory": {
         "message": "Pulisci"
     },

@@ -7,6 +7,8 @@ TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE AUTHORS, MAINTAINERS, CON
 THE USER ASSUMES SOLE RESPONSIBILITY FOR INSTALLATION, CONFIGURATION, OPERATION, COMPLIANCE, AND ANY RESULTS OBTAINED FROM USE OF THE SOFTWARE.
 THIS NOTICE DOES NOT LIMIT OR ALTER ANY RIGHTS GRANTED UNDER THE GPL LICENSE.
 
+**DOWNLOAD POLICY WARNING: FOR SECURE PRE-SCAN CONTAINMENT, CLAMFOX ALLOWS PROTECTED DOWNLOAD FLOW ONLY WHEN FILES ARE SAVED IN THE USER'S `DOWNLOADS` FOLDER. IF A FILE IS SAVED OUTSIDE THIS FOLDER, CLAMFOX CAN BLOCK THE DOWNLOAD TO ENFORCE THE SAFE-ZONE POLICY.**
+
 Firefox extension to filter traffic and scan downloads using ClamAV.
 
 Architecture
@@ -56,6 +58,11 @@ Package for distribution:
 
 Hardware trust (ERT):
 If TPM 2.0 is present AND ERT is enabled/configured, the engine uses TPM-backed (hardware-anchored) module signing verification at startup.
+
+Local runtime state hygiene:
+- `host/config.json` is local runtime state and can contain machine-specific security metadata.
+- Do not share it in bug reports, screenshots, or archives.
+- Keep it untracked (it is ignored by `.gitignore`) and prefer regenerating it via `host/install.sh` when needed.
 
 License
 

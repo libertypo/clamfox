@@ -542,6 +542,15 @@ button:disabled {
     margin-bottom: 24px;
 }
 
+.quick-setting-card {
+    margin-top: 14px;
+    margin-bottom: 15px;
+}
+
+.compact-setting-row {
+    padding: 0;
+}
+
 .setting-row {
     display: flex;
     justify-content: space-between;

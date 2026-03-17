@@ -3,7 +3,7 @@
 # ClamFox Pro Installer - Vicious Hardening Edition
 # Moves the host to /opt/clamfox and registers it globally.
 
-set -e
+set -euo pipefail
 
 INSTALL_DIR="/opt/clamfox"
 HOST_NAME="clamav_host"
@@ -179,6 +179,11 @@ CLAM_PATH=$(command -v clamdscan || command -v clamscan)
 CLAM_HASH=$(python3 -c "import hashlib; print(hashlib.sha256(open('$CLAM_PATH','rb').read()).hexdigest())")
 ACTUAL_USER=${SUDO_USER:-$(logname 2>/dev/null || echo $USER)}
 USER_GROUP=$(id -gn "$ACTUAL_USER")
+USER_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
+if [ -z "$USER_HOME" ]; then
+    USER_HOME="/home/$ACTUAL_USER"
+fi
+USER_QUARANTINE_DIR="$USER_HOME/.clamfox_quarantine"
 
 if [ -f "$DIR/config.json" ]; then
     cp "$DIR/config.json" "$INSTALL_DIR/"
@@ -215,9 +220,18 @@ chmod 600 "$INSTALL_DIR/config.json"
 chmod 644 "$INSTALL_DIR/trust_db.json" 2>/dev/null || true
 chmod 700 "$INSTALL_DIR/quarantine" 
 chmod 755 "$INSTALL_DIR/signatures"
-chmod 644 "$INSTALL_DIR/urldb.txt" 2>/dev/null || touch "$INSTALL_DIR/urldb.txt" && chmod 644 "$INSTALL_DIR/urldb.txt"
+if ! chmod 644 "$INSTALL_DIR/urldb.txt" 2>/dev/null; then
+    touch "$INSTALL_DIR/urldb.txt"
+    chmod 644 "$INSTALL_DIR/urldb.txt"
+fi
 chown "$ACTUAL_USER:$USER_GROUP" "$INSTALL_DIR/urldb.txt" "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null || true
 chmod 644 "$INSTALL_DIR/phishdb.txt" "$INSTALL_DIR/whitelistdb.txt" 2>/dev/null || true
+
+# Runtime host path hardening: the engine stages downloads in ~/.clamfox_quarantine.
+# If this directory is missing or root-owned from prior runs, secure pre-scan staging fails.
+mkdir -p "$USER_QUARANTINE_DIR"
+chown -R "$ACTUAL_USER:$USER_GROUP" "$USER_QUARANTINE_DIR"
+chmod 700 "$USER_QUARANTINE_DIR"
 
 # 5.5 Supply-Chain Canary Provisioning
 echo "🛡️  Planting Supply-Chain Canary..."
@@ -239,8 +253,17 @@ fi
 # 6. Global Registration
 echo "📋 Cleaning up conflicting local manifests..."
 # Aggressively remove any user-local or profile-specific manifests that might override the global one
-USER_HOME=$(eval echo "~$ACTUAL_USER")
+USER_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
+if [ -z "$USER_HOME" ]; then
+    echo "❌ Unable to resolve home directory for user: $ACTUAL_USER"
+    exit 1
+fi
 find "$USER_HOME/.mozilla" -name "$MANIFEST_FILE" -exec rm -f {} + 2>/dev/null || true
+
+# Force extension payload refresh on next Firefox start/reload.
+# With installation_mode=normal_installed, Firefox can keep a cached profile XPI
+# if version doesn't advance, causing stale background.js behavior.
+find "$USER_HOME/.mozilla/firefox" -path "*/extensions/clamfox@ovidio.me.xpi" -exec rm -f {} + 2>/dev/null || true
 
 echo "📋 Registering Native Messaging Host globally..."
 mkdir -p "$GLOBAL_MANIFEST_DIR"
@@ -260,26 +283,34 @@ if ! command -v zip &> /dev/null; then
 fi
 
 PARENT_DIR="$(cd "$DIR/.." && pwd)"
-TEMP_BUILD="/tmp/clamfox_build"
-rm -rf "$TEMP_BUILD"
-mkdir -p "$TEMP_BUILD"
+TEMP_BUILD=$(mktemp -d /tmp/clamfox_build.XXXXXX)
+trap 'rm -rf "$TEMP_BUILD"' EXIT
 cp -r "$PARENT_DIR/background.js" "$PARENT_DIR/content.js" "$PARENT_DIR/content.css" \
       "$PARENT_DIR/design_tokens.css" "$PARENT_DIR/manifest.json" "$PARENT_DIR/popup" \
       "$PARENT_DIR/icons" "$PARENT_DIR/_locales" "$TEMP_BUILD/"
 
 (cd "$TEMP_BUILD" && zip -r "$INSTALL_DIR/clamfox.xpi" ./* > /dev/null)
 rm -rf "$TEMP_BUILD"
+trap - EXIT
 chmod 644 "$INSTALL_DIR/clamfox.xpi"
 
 POLICY_DIR="/etc/firefox/policies"
 mkdir -p "$POLICY_DIR"
 POLICY_FILE="$POLICY_DIR/policies.json"
 
-python3 - <<PYEOF
+CLAMFOX_POLICY_FILE="$POLICY_FILE" CLAMFOX_USER_HOME="$USER_HOME" python3 - <<'PYEOF'
 import json
 import os
 
-path = "$POLICY_FILE"
+path = os.environ.get("CLAMFOX_POLICY_FILE")
+user_home = os.environ.get("CLAMFOX_USER_HOME")
+if not path:
+    raise RuntimeError("Missing CLAMFOX_POLICY_FILE")
+if not user_home:
+    raise RuntimeError("Missing CLAMFOX_USER_HOME")
+
+download_dir = os.path.join(user_home, "Downloads")
+
 data = {}
 if os.path.exists(path):
     try:
@@ -294,6 +325,18 @@ ext_settings["clamfox@ovidio.me"] = {
     "installation_mode": "normal_installed",
     "install_url": "file:///opt/clamfox/clamfox.xpi"
 }
+
+# Force download behavior at browser level (stable alternative to webRequest
+# cancel/re-download hooks): disable internal inline viewers so files land on
+# disk and are scanned by the post-download shield.
+prefs = policies.setdefault("Preferences", {})
+prefs["pdfjs.disabled"] = {"Value": True, "Status": "locked"}
+prefs["browser.download.viewableInternally.enabledTypes"] = {"Value": "", "Status": "locked"}
+prefs["browser.download.useDownloadDir"] = {"Value": True, "Status": "locked"}
+prefs["browser.download.folderList"] = {"Value": 2, "Status": "locked"}
+prefs["browser.download.always_ask_before_handling_new_types"] = {"Value": False, "Status": "locked"}
+prefs["browser.download.dir"] = {"Value": download_dir, "Status": "locked"}
+prefs["browser.download.lastDir"] = {"Value": download_dir, "Status": "locked"}
 
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:

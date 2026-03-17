@@ -24,26 +24,26 @@ class SecuritySuitePython(unittest.TestCase):
         self.assertNotEqual(end, -1, f"missing end marker: {end_marker}")
         return self.bg[start:end]
 
-    def test_download_lock_must_precede_scan(self) -> None:
+    def test_download_stage_must_precede_scan(self) -> None:
         download_handler = self._section(
             "browser.downloads.onChanged.addListener(async (delta) => {",
             "class ScanRateLimiter {",
         )
-        lock_idx = download_handler.find('action: "lock"')
+        stage_idx = download_handler.find('action: "stage_quarantine"')
         scan_idx = download_handler.find(
-            'performScan(item.filename, "file", item.id, null, lockedBeforeScan);'
+            'performScan(scanTarget, "file", item.id, null, stagedBeforeScan);'
         )
-        self.assertGreaterEqual(lock_idx, 0, "lock action missing in download handler")
+        self.assertGreaterEqual(stage_idx, 0, "stage_quarantine action missing in download handler")
         self.assertGreaterEqual(scan_idx, 0, "performScan call missing in download handler")
-        self.assertLess(lock_idx, scan_idx, "performScan happens before lock")
+        self.assertLess(stage_idx, scan_idx, "performScan happens before staging")
 
-    def test_lock_failure_is_fail_closed(self) -> None:
+    def test_staging_failure_is_fail_closed(self) -> None:
         download_handler = self._section(
             "browser.downloads.onChanged.addListener(async (delta) => {",
             "class ScanRateLimiter {",
         )
         catch_idx = download_handler.find("} catch (e) {")
-        self.assertGreaterEqual(catch_idx, 0, "lock failure catch block missing")
+        self.assertGreaterEqual(catch_idx, 0, "staging failure catch block missing")
 
         failure_slice = download_handler[catch_idx:]
         cancel_idx = failure_slice.find("await browser.downloads.cancel(delta.id);")
@@ -55,6 +55,8 @@ class SecuritySuitePython(unittest.TestCase):
         self.assertGreaterEqual(erase_idx, 0, "erase missing in lock-failure path")
         self.assertLess(cancel_idx, remove_idx, "removeFile should follow cancel")
         self.assertLess(remove_idx, erase_idx, "erase should follow removeFile")
+        self.assertNotIn('performScan(scanTarget, "file", item.id, null, false);', failure_slice)
+        self.assertIn('downloadsFolderOnlyWarning', failure_slice)
         self.assertIn('title: "🛑 DOWNLOAD BLOCKED"', failure_slice)
         self.assertIn("return;", failure_slice)
 

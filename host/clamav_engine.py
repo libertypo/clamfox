@@ -15,21 +15,24 @@ import locale
 import gettext
 import re
 import hashlib
+import stat
 import socket
 import tempfile
 import random
-import string
 import secrets
+import uuid
+import zipfile
+import hmac
 from urllib.parse import urlparse, urljoin
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import base64
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from tpm_provider import TpmProvider
 from yara_sanitizer import YaraSanitizer
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -61,7 +64,7 @@ def verify_canary_integrity():
     return True
 
 # Setup Localization (I18N)
-def _setup_i18n():
+def _setup_i18n() -> Callable[[str], str]:
     localedir = os.path.join(os.path.dirname(__file__), 'locales')
     try:
         # Smart locale detection
@@ -76,7 +79,7 @@ _ = _setup_i18n()
 
 # Global state for Resource Watchdog (Circuit Breaker)
 _scan_count_lock = threading.Lock()
-_scan_timestamps = []
+_scan_timestamps: List[float] = []
 _CIRCUIT_BREAKER_THROTTLE = 50  # Increased for power users
 _MAX_RECURSION_DEPTH = 5        # Archive depth protection
 _PRIVATE_TUNNEL_FORCE = False   # If True, block fetch if tunnel is down
@@ -86,25 +89,33 @@ _NETWORK_TIMEOUT = 15           # Limit for API/Fetch (seconds)
 _MAX_CONTAINER_FILES = 500      # Max files in an archive to prevent ZIP bombs
 _MAX_CONTAINER_UNCOMPRESSED_SIZE = 100 * 1024 * 1024 # 100 MB max uncompressed size for archives
 _QUARANTINE_DIR = os.path.expanduser("~/.clamfox_quarantine")
+_DOC_SANITIZE_EXTENSIONS = {
+    ".pdf",
+    ".odt", ".ods", ".odp", ".odg", ".odf",
+    ".docx", ".xlsx", ".pptx",
+    ".docm", ".dotm", ".xlsm", ".xltm", ".pptm", ".potm", ".ppsm"
+}
+_LEGACY_OFFICE_EXTENSIONS = {".doc", ".xls", ".ppt", ".rtf"}
 
 # Global Persistent State
 SENSITIVE_CONFIG_KEYS = ["secret", "integrity_hash", "honeypot_secret"]
 
-_config_lock = threading.Lock()
+# RLock so check-action config mutations can hold the lock across save_config calls.
+_config_lock = threading.RLock()
 _output_lock = threading.Lock()
 
 # Global Caches (Initialized as None)
-_BINARY_INTEGRITY_CACHE = {"path": None, "hash": None, "timestamp": 0}
+_binary_integrity_cache: Dict[str, Any] = {"path": None, "hash": None, "timestamp": 0}
 _BINARY_CACHE_TTL = 60  # Cache verification results for 60 seconds
 
-_url_cache = None
-_url_domain_cache = None
+_url_cache: Optional[Set[str]] = None
+_url_domain_cache: Optional[Set[str]] = None
 _cache_last_loaded = 0
 
-_phish_cache = None
+_phish_cache: Optional[Set[str]] = None
 _phish_last_loaded = 0
 
-_whitelist_cache = None
+_whitelist_cache: Optional[Set[str]] = None
 _whitelist_last_loaded = 0
 
 # Multi-Core Engines
@@ -116,7 +127,7 @@ _thread_pool = ThreadPoolExecutor(max_workers=6)
 # low-end hardware and avoid spawning more processes than logical cores.
 _process_pool_max_workers = min(os.cpu_count() or 2, 4)
 
-def _create_process_pool_safely(reason):
+def _create_process_pool_safely(reason: str) -> Optional[ProcessPoolExecutor]:
     """Create process pool with safe fallback when system confinement blocks SemLock."""
     try:
         return ProcessPoolExecutor(max_workers=_process_pool_max_workers)
@@ -128,7 +139,7 @@ def _create_process_pool_safely(reason):
 _process_pool = _create_process_pool_safely("initialization")
 _process_pool_lock = threading.Lock()
 
-def _recreate_process_pool_locked(reason):
+def _recreate_process_pool_locked(reason: str) -> Optional[ProcessPoolExecutor]:
     """Recreate process pool after a broken/shutdown state.
 
     Must be called only while holding _process_pool_lock.
@@ -145,7 +156,7 @@ def _recreate_process_pool_locked(reason):
         log_debug(f"Process pool recreated: {reason}")
     return _process_pool
 
-def _get_process_pool():
+def _get_process_pool() -> Optional[ProcessPoolExecutor]:
     """Return a healthy process pool, recreating it on broken/shutdown state."""
     global _process_pool
     with _process_pool_lock:
@@ -160,12 +171,12 @@ def _get_process_pool():
 
         return _process_pool
 
-def _scan_members_in_process_pool(all_files, context_label):
+def _scan_members_in_process_pool(all_files: List[str], context_label: str) -> Optional[Dict[str, Any]]:
     """Parallel-scan extracted members with timeout-safe cancellation and pool recovery."""
     if not all_files:
         return None
 
-    futures = []
+    futures: List[concurrent.futures.Future[Dict[str, Any]]] = []
     try:
         pool = _get_process_pool()
         if pool is None:
@@ -212,16 +223,15 @@ import atexit
 atexit.register(_cleanup_pools)
 
 # Runtime Integrity Watchdog State
-_MODULE_SNAPSHOTS = {}
+_MODULE_SNAPSHOTS: Dict[str, Optional[str]] = {}
 _CRITICAL_MODULES = ["clamav_engine.py", "tpm_provider.py", "yara_sanitizer.py", "ert_signer.py"]
-_secret_issued_lock = threading.Lock()  # Guards atomic check-and-set of _secret_issued
-_secret_issued = False
+_secret_issued_lock = threading.Lock()  # Guards should_emit_secret computation in check action
 
 # Global Background Task Status
-_BACKGROUND_TASKS_STATUS = {}
+_BACKGROUND_TASKS_STATUS: Dict[str, Dict[str, Any]] = {}
 _status_lock = threading.Lock()
 
-def set_task_status(name, status, error=None):
+def set_task_status(name: str, status: str, error: Optional[str] = None) -> None:
     """Update the status of a long-running background task."""
     with _status_lock:
         _BACKGROUND_TASKS_STATUS[name] = {
@@ -230,7 +240,7 @@ def set_task_status(name, status, error=None):
             "time": time.time()
         }
 
-def capture_runtime_snapshots():
+def capture_runtime_snapshots() -> None:
     """Capture initial SHA-256 hashes of all critical host modules."""
     host_dir = os.path.dirname(os.path.abspath(__file__))
     for module in _CRITICAL_MODULES:
@@ -239,7 +249,7 @@ def capture_runtime_snapshots():
             _MODULE_SNAPSHOTS[module] = get_file_hash(path)
     log_debug(f"🛡️  INTEGRITY: Captured runtime snapshots for {len(_MODULE_SNAPSHOTS)} modules.")
 
-def runtime_integrity_sentinel():
+def runtime_integrity_sentinel() -> None:
     """Background thread that re-verifies module integrity at random intervals."""
     log_debug("🛡️  INTEGRITY: Sentinel Watchdog activated.")
     while True:
@@ -267,7 +277,7 @@ def runtime_integrity_sentinel():
         except Exception as e:
             log_debug(f"INTEGRITY ERROR (Sentinel): {e}")
 
-def verify_kernel_integrity():
+def verify_kernel_integrity() -> None:
     """Verify FS-Verity state if supported by the kernel."""
     if not shutil.which("fsverity"):
         return
@@ -285,7 +295,7 @@ def verify_kernel_integrity():
     except Exception:
         pass
 
-def validate_message_timestamp(timestamp, max_drift_seconds=60):
+def validate_message_timestamp(timestamp: float, max_drift_seconds: float = 60) -> bool:
     """Validate message timestamp to prevent replay attacks.
     
     Args:
@@ -311,7 +321,7 @@ def validate_message_timestamp(timestamp, max_drift_seconds=60):
 
 # Security: Resolve external tool paths at startup to prevent
 # PATH hijacking attacks. Use absolute paths for production reliability.
-def _resolve_bin(bin_name, primary_path):
+def _resolve_bin(bin_name: str, primary_path: str) -> Optional[str]:
     if os.path.exists(primary_path) and os.access(primary_path, os.X_OK):
         return primary_path
     return shutil.which(bin_name)
@@ -323,38 +333,82 @@ _BIN_WL_PASTE  = shutil.which("wl-paste")
 _BIN_XCLIP     = shutil.which("xclip")
 _BIN_SYSTEMCTL = _resolve_bin("systemctl", "/usr/bin/systemctl")
 
-import itertools
-import base64
-
-
-
-
-
-_MACHINE_KEY_CACHE = None
+_machine_key_cache: Any = None
 
 def _machine_key_fallback_path():
     cfg_dir = os.path.expanduser("~/.config/clamfox")
     return os.path.join(cfg_dir, "machine_private_key.pem")
+
+def _read_fallback_machine_key(fallback_path):
+    """Read fallback machine key only from a secure regular file owned by current user."""
+    try:
+        st = os.lstat(fallback_path)
+        if stat.S_ISLNK(st.st_mode):
+            log_debug("SECURITY ALERT: Fallback machine key path is a symlink. Refusing to load.")
+            return None
+        if not stat.S_ISREG(st.st_mode):
+            log_debug("SECURITY ALERT: Fallback machine key path is not a regular file. Refusing to load.")
+            return None
+        if st.st_uid != os.getuid():
+            log_debug("SECURITY ALERT: Fallback machine key ownership mismatch. Refusing to load.")
+            return None
+
+        mode = stat.S_IMODE(st.st_mode)
+        if mode & 0o077:
+            # Tighten permissive mode before reading private key material.
+            os.chmod(fallback_path, 0o600)
+
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(fallback_path, flags)
+        with os.fdopen(fd, "rb") as f:
+            return f.read()
+    except Exception as e:
+        log_debug(f"Fallback machine key read validation failed: {e}")
+        return None
+
+def _write_fallback_machine_key_atomic(fallback_path, pem_bytes):
+    """Persist fallback machine key with strict perms and atomic replace."""
+    cfg_dir = os.path.dirname(fallback_path)
+    os.makedirs(cfg_dir, mode=0o700, exist_ok=True)
+    os.chmod(cfg_dir, 0o700)
+
+    tmp_path = fallback_path + ".tmp"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(pem_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, fallback_path)
+        os.chmod(fallback_path, 0o600)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 def get_or_create_machine_key():
     """
     Retrieve or Generate a machine-unique EC-DSA (P-256) Private Key.
     Stored in System Keyring for release-grade security.
     """
-    global _MACHINE_KEY_CACHE
-    if _MACHINE_KEY_CACHE:
-        return _MACHINE_KEY_CACHE
+    global _machine_key_cache
+    if _machine_key_cache:
+        return _machine_key_cache
 
     try:
         # Try to retrieve from Keyring
         stored_pem = keyring_get("machine_private_key")
         if stored_pem:
             try:
-                _MACHINE_KEY_CACHE = serialization.load_pem_private_key(
+                _machine_key_cache = serialization.load_pem_private_key(
                     stored_pem.encode('utf-8'),
                     password=None
                 )
-                return _MACHINE_KEY_CACHE
+                return _machine_key_cache
             except Exception:
                 log_debug("CORRUPTION: Keyring key invalid, regenerating...")
 
@@ -364,13 +418,14 @@ def get_or_create_machine_key():
         fallback_path = _machine_key_fallback_path()
         if os.path.exists(fallback_path):
             try:
-                with open(fallback_path, "rb") as f:
-                    pem_bytes = f.read()
-                _MACHINE_KEY_CACHE = serialization.load_pem_private_key(
+                pem_bytes = _read_fallback_machine_key(fallback_path)
+                if not pem_bytes:
+                    raise ValueError("Fallback key file failed security validation")
+                _machine_key_cache = serialization.load_pem_private_key(
                     pem_bytes,
                     password=None
                 )
-                return _MACHINE_KEY_CACHE
+                return _machine_key_cache
             except Exception:
                 log_debug("CORRUPTION: Fallback machine key invalid, regenerating...")
 
@@ -386,16 +441,12 @@ def get_or_create_machine_key():
         stored_in_keyring = keyring_set("machine_private_key", pem.decode('utf-8'))
         if not stored_in_keyring:
             try:
-                cfg_dir = os.path.dirname(fallback_path)
-                os.makedirs(cfg_dir, mode=0o700, exist_ok=True)
-                with open(fallback_path, "wb") as f:
-                    f.write(pem)
-                os.chmod(fallback_path, 0o600)
+                _write_fallback_machine_key_atomic(fallback_path, pem)
             except Exception as key_file_err:
                 log_debug(f"Fallback machine key persist failed: {key_file_err}")
 
         # Cache key immediately so optional audit artifacts cannot break signing.
-        _MACHINE_KEY_CACHE = private_key
+        _machine_key_cache = private_key
         
         # Save Public Key locally for audit/verification
         pub_key = private_key.public_key()
@@ -447,6 +498,8 @@ def secure_log_encode(text):
     if not isinstance(text, str): text = str(text)
     try:
         priv_key = get_or_create_machine_key()
+        if not priv_key:
+            return text
         aes_key = derive_aes_key(priv_key)
         if not aes_key: return text
         
@@ -467,7 +520,7 @@ def secure_log_encode(text):
         sig_len = len(signature)
         combined = iv + tag + bytes([sig_len]) + signature + ciphertext
         return base64.b64encode(combined).decode('utf-8')
-    except Exception as e:
+    except Exception:
         # log_debug(f"ENCODE ERROR: {e}")
         return text
 
@@ -475,6 +528,8 @@ def secure_log_decode(text):
     try:
         combined = base64.b64decode(text.strip().encode('utf-8'))
         priv_key = get_or_create_machine_key()
+        if not priv_key:
+            return text.strip()
         aes_key = derive_aes_key(priv_key)
         if not aes_key: return text.strip()
         
@@ -497,7 +552,7 @@ def secure_log_decode(text):
         
         decrypted = decryptor.update(ciphertext) + decryptor.finalize()
         return decrypted.decode('utf-8')
-    except Exception as e:
+    except Exception:
         # log_debug(f"DECODE ERROR: {e}")
         return text.strip()
 
@@ -676,6 +731,7 @@ def is_safe_path(filepath):
         safe_roots = [
             tempfile.gettempdir(),
             "/dev/shm",
+            f"/run/user/{os.getuid()}/doc",
             _QUARANTINE_DIR,
             os.path.dirname(__file__),
         ] + downloads_roots
@@ -713,6 +769,59 @@ def is_safe_path(filepath):
         log_debug(f"Security Engine path validation error: {e}")
         return False
 
+def is_safe_staging_source(filepath):
+    """Constrained fallback for staging downloads from custom locations.
+
+    This is intentionally broader than is_safe_path(), but only for the
+    `stage_quarantine` action. It allows user-owned regular files located in
+    common user-controlled roots so downloads saved outside XDG_DOWNLOAD_DIR
+    can still be quarantined and scanned.
+    """
+    if not filepath:
+        return False
+    try:
+        abs_path = os.path.abspath(os.path.expanduser(filepath))
+        real_path = os.path.realpath(abs_path)
+
+        if not os.path.exists(real_path) or not os.path.isfile(real_path):
+            return False
+
+        st = os.stat(real_path)
+        if st.st_uid != os.getuid():
+            return False
+
+        blocked_roots = ["/proc", "/sys", "/dev"]
+        for blocked in blocked_roots:
+            if real_path == blocked or real_path.startswith(blocked + os.path.sep):
+                return False
+
+        username = os.environ.get("USER", "")
+        candidate_roots = [
+            os.path.expanduser("~"),
+            tempfile.gettempdir(),
+            "/dev/shm",
+            f"/run/user/{os.getuid()}/doc",
+        ]
+        if username:
+            candidate_roots.extend([
+                f"/run/media/{username}",
+                f"/media/{username}",
+            ])
+
+        for root in candidate_roots:
+            if not root:
+                continue
+            root_abs = os.path.realpath(os.path.abspath(os.path.expanduser(root)))
+            if not os.path.exists(root_abs):
+                continue
+            if os.path.commonpath([root_abs, real_path]) == root_abs:
+                return True
+
+        return False
+    except Exception as e:
+        log_debug(f"Staging path validation error: {e}")
+        return False
+
 def is_within_directory(directory, target):
     """Tar Slip Protection: Ensure extracted members stay within the target directory."""
     abs_directory = os.path.abspath(directory)
@@ -726,30 +835,34 @@ def send_message(message_content):
         # Add cryptographic signature to ensure response authenticity
         try:
             priv_key = get_or_create_machine_key()
-            if priv_key:
-                message_content["_signed_at"] = int(time.time())
-                message_content["_pubkey_hint"] = priv_key.public_key().public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                ).decode('utf-8')[:100]  # First 100 chars as continuity hint
+            if not priv_key:
+                raise RuntimeError("Missing machine signing key")
 
-                # Sign all response fields except _signature itself.
-                # This covers security metadata (e.g., _signed_at/_pubkey_hint)
-                # so they cannot be altered without invalidating the signature.
-                # Canonical compact JSON avoids spacing/serializer drift with
-                # browser-side signature verification logic.
-                response_data = json.dumps(
-                    {k: v for k, v in message_content.items() if k != "_signature"},
-                    sort_keys=True,
-                    separators=(',', ':'),
-                    ensure_ascii=False
-                )
+            message_content["_signed_at"] = int(time.time())
+            message_content["_pubkey_hint"] = priv_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode('utf-8')[:100]  # First 100 chars as continuity hint
 
-                # Sign with EC-DSA (P-256, SHA-256)
-                signature = priv_key.sign(response_data.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
-                message_content["_signature"] = base64.b64encode(signature).decode('utf-8')
+            # Sign all response fields except _signature itself.
+            # This covers security metadata (e.g., _signed_at/_pubkey_hint)
+            # so they cannot be altered without invalidating the signature.
+            # Canonical compact JSON avoids spacing/serializer drift with
+            # browser-side signature verification logic.
+            response_data = json.dumps(
+                {k: v for k, v in message_content.items() if k != "_signature"},
+                sort_keys=True,
+                separators=(',', ':'),
+                ensure_ascii=False
+            )
+
+            # Sign with EC-DSA (P-256, SHA-256)
+            signature = priv_key.sign(response_data.encode('utf-8'), ec.ECDSA(hashes.SHA256()))
+            message_content["_signature"] = base64.b64encode(signature).decode('utf-8')
         except Exception as sig_err:
-            log_debug(f"Response signing failed (continuing anyway): {sig_err}")
+            # Fail-closed: never emit unsigned responses on auth-critical bridge.
+            log_debug(f"Response signing failed (fail-closed): {sig_err}")
+            return
         
         content = json.dumps(message_content).encode('utf-8')
         log_debug(f"Sending: {json.dumps(message_content)[:500]}...") # Truncate log
@@ -956,6 +1069,8 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
         return False
 
     tunnelled = False
+    tor_active = False
+    tor_port = None
 
     if use_tunnel:
         tor_active, tor_port = check_tor_reachable()
@@ -1041,7 +1156,7 @@ def secure_fetch(url, output_path, use_tunnel=False, post_data=None, headers=Non
         log_debug(f"FETCH EXCEPTION for {mask_url(url)}: {type(e).__name__}: {e}")
     return False
 
-def check_clamav(verify=False):
+def check_clamav(verify: bool = False) -> Tuple[bool, Optional[str], bool]:
     """
     Locate ClamAV binaries and optionally verify their integrity.
     If verify=True, the binary hash is checked against the config.
@@ -1077,18 +1192,18 @@ def check_clamav(verify=False):
 
 def KEYRING_NAME(): return "ClamFox-Security-Vault"
 
-_KEYRING_AVAILABLE = None
+_keyring_available: Optional[bool] = None
 
 def _is_keyring_available():
     """Return True when secret-tool and user DBus session are available."""
-    global _KEYRING_AVAILABLE
-    if _KEYRING_AVAILABLE is not None:
-        return _KEYRING_AVAILABLE
+    global _keyring_available
+    if _keyring_available is not None:
+        return _keyring_available
 
     has_secret_tool = shutil.which("secret-tool") is not None
     has_dbus = bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS"))
-    _KEYRING_AVAILABLE = bool(has_secret_tool and has_dbus)
-    return _KEYRING_AVAILABLE
+    _keyring_available = bool(has_secret_tool and has_dbus)
+    return _keyring_available
 
 def _validate_keyring_args(key, value=None):
     """
@@ -1108,7 +1223,7 @@ def _validate_keyring_args(key, value=None):
         if len(value) > 16384: # 16KB hard limit
             raise ValueError("Security Violation: Keyring value exceeds 16KB limit.")
 
-def keyring_get(key):
+def keyring_get(key: str) -> Optional[str]:
     """Retrieve sensitive data from System Keyring using secret-tool."""
     try:
         if not _is_keyring_available():
@@ -1122,7 +1237,7 @@ def keyring_get(key):
         log_debug(f"Keyring Lookup Error (secret-tool): {e}")
     return None
 
-def keyring_set(key, value):
+def keyring_set(key: str, value: str) -> bool:
     """Store sensitive data in System Keyring using secret-tool."""
     try:
         if not _is_keyring_available():
@@ -1137,10 +1252,10 @@ def keyring_set(key, value):
         log_debug(f"Keyring Store Error (secret-tool): {e}")
         return False
 
-def load_config():
+def load_config() -> Dict[str, Any]:
     """Load non-sensitive config from file and sensitive data from Keyring."""
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
-    config = {}
+    config: Dict[str, Any] = {}
     if os.path.exists(config_path):
         try:
             with open(config_path) as f:
@@ -1150,24 +1265,19 @@ def load_config():
         except Exception as e:
             log_debug(f"Config Load Error: {e}")
     
-    # Prioritize keyring, then fallback to file-backed secrets when unavailable.
+    # Security hardening: sensitive secrets must come from keyring/TPM only.
+    # Do not load file-backed fallback secrets from config.json.
     vault_secret = keyring_get("secret")
     if vault_secret:
         config["secret"] = vault_secret
-    elif config.get("fallback_secret"):
-        config["secret"] = config.get("fallback_secret")
     
     vault_hash = keyring_get("integrity_hash")
     if vault_hash:
         config["integrity_hash"] = vault_hash
-    elif config.get("fallback_integrity_hash"):
-        config["integrity_hash"] = config.get("fallback_integrity_hash")
     
     vault_hp = keyring_get("honeypot_secret")
     if vault_hp:
         config["honeypot_secret"] = vault_hp
-    elif config.get("fallback_honeypot_secret"):
-        config["honeypot_secret"] = config.get("fallback_honeypot_secret")
     
     # --- ERT Hardware Unsealing ---
     if config.get("ert_enabled") and config.get("ert_sealed"):
@@ -1192,28 +1302,29 @@ def load_config():
             
     return config
 
-def save_config(config):
+def save_config(config: Dict[str, Any]) -> None:
     """Save sensitive items to Keyring and public items to JSON (Thread-safe)."""
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     
     with _config_lock:
-        fallback_values = {}
         # 1. Update Keyring
         try:
             for key in SENSITIVE_CONFIG_KEYS:
                 if key in config:
                     stored = keyring_set(key, str(config[key]))
                     if not stored:
-                        fallback_values[f"fallback_{key}"] = str(config[key])
+                        # Never persist sensitive secrets in plaintext fallback fields.
+                        log_debug(f"Keyring unavailable for '{key}'; skipping disk fallback for sensitive value.")
         except Exception as e:
             log_debug(f"Keyring persistent error: {e}")
                 
         # 2. Update File (stripped of sensitive data)
         try:
             public_config = {k: v for k, v in config.items() if k not in SENSITIVE_CONFIG_KEYS}
-            public_config.update(fallback_values)
             with open(config_path, "w") as f:
                 json.dump(public_config, f, indent=4)
+            # Enforce least-privilege file mode for public config file.
+            os.chmod(config_path, 0o600)
         except PermissionError:
             log_debug(f"Permission denied writing config to {config_path} - skipping persistent save.")
         except Exception as e:
@@ -1256,12 +1367,334 @@ def quarantine_file(filepath):
         except OSError:
             return False
 
+def _stage_metadata_path(staged_path):
+    return staged_path + ".meta.json"
+
+def _stage_metadata_mac(meta):
+    """Generate authenticated MAC for stage metadata to prevent destination tampering."""
+    try:
+        priv_key = get_or_create_machine_key()
+        if not priv_key:
+            return None
+        mac_key = derive_aes_key(priv_key)
+        if not mac_key:
+            return None
+        payload = "|".join([
+            str(meta.get("original_path") or ""),
+            str(meta.get("staged_path") or ""),
+            str(int(meta.get("staged_at") or 0)),
+        ]).encode("utf-8")
+        return hmac.new(mac_key, payload, hashlib.sha256).hexdigest()
+    except Exception as e:
+        log_debug(f"Stage metadata MAC generation failed: {e}")
+        return None
+
+def _write_stage_metadata(staged_path, original_path):
+    try:
+        meta = {
+            "original_path": original_path,
+            "staged_path": staged_path,
+            "staged_at": int(time.time())
+        }
+        mac = _stage_metadata_mac(meta)
+        if not mac:
+            raise ValueError("Stage metadata MAC unavailable")
+        meta["mac"] = mac
+        meta_path = _stage_metadata_path(staged_path)
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+        os.chmod(meta_path, 0o600)
+    except Exception as e:
+        log_debug(f"Stage metadata write failed: {e}")
+
+def _read_stage_metadata(staged_path):
+    try:
+        meta_path = _stage_metadata_path(staged_path)
+        if not os.path.exists(meta_path):
+            return None
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return None
+        expected_mac = _stage_metadata_mac(data)
+        provided_mac = data.get("mac")
+        if not expected_mac or not isinstance(provided_mac, str):
+            log_debug(f"Stage metadata missing auth MAC for {staged_path}")
+            return None
+        if not hmac.compare_digest(provided_mac, expected_mac):
+            log_debug(f"Stage metadata MAC mismatch for {staged_path}")
+            return None
+        return data
+    except Exception as e:
+        log_debug(f"Stage metadata read failed: {e}")
+        return None
+
+def _delete_stage_metadata(staged_path):
+    try:
+        meta_path = _stage_metadata_path(staged_path)
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
+    except Exception as e:
+        log_debug(f"Stage metadata delete failed: {e}")
+
+def stage_download_for_quarantine(filepath):
+    """Move any completed download into quarantine before scanning."""
+    try:
+        if not filepath or not os.path.exists(filepath):
+            return {"status": "error", "error": "File not found"}
+
+        if not os.path.exists(_QUARANTINE_DIR):
+            os.makedirs(_QUARANTINE_DIR, mode=0o700)
+
+        real_source = os.path.realpath(os.path.abspath(os.path.expanduser(filepath)))
+        quarantine_real = os.path.realpath(os.path.abspath(_QUARANTINE_DIR))
+
+        if os.path.commonpath([quarantine_real, real_source]) == quarantine_real:
+            lock_file(real_source)
+            return {
+                "status": "ok",
+                "target": real_source,
+                "original_path": real_source,
+                "already_staged": True
+            }
+
+        base_name = os.path.basename(filepath)
+        unique = uuid.uuid4().hex[:8]
+        staged_name = f"stage_{int(time.time())}_{unique}_{base_name}"
+        staged_path = os.path.join(_QUARANTINE_DIR, staged_name)
+
+        used_copy_fallback = False
+        try:
+            shutil.move(filepath, staged_path)
+        except PermissionError as move_err:
+            used_copy_fallback = True
+            # Some desktop-portal/FUSE download paths can deny unlink/rename.
+            # Also avoid copy2() metadata propagation on those mounts because
+            # copystat/chmod can raise PermissionError even when byte-copy works.
+            try:
+                shutil.copyfile(filepath, staged_path)
+            except Exception:
+                # Last resort: plain stream copy to tolerate odd virtual files.
+                with open(filepath, "rb") as src_f, open(staged_path, "wb") as dst_f:
+                    shutil.copyfileobj(src_f, dst_f)
+
+            log_debug(
+                f"DOWNLOAD STAGED (copy fallback after move denied): {filepath} -> {staged_path} ({move_err})"
+            )
+
+        source_contained = True
+        if used_copy_fallback and os.path.exists(filepath):
+            # Fail-closed: if source couldn't be moved, ensure original file is no
+            # longer user-accessible before reporting successful staging.
+            source_contained = False
+            try:
+                os.remove(filepath)
+                source_contained = True
+            except Exception:
+                try:
+                    source_contained = lock_file(filepath)
+                except Exception:
+                    source_contained = False
+
+            if not source_contained:
+                try:
+                    if os.path.exists(staged_path):
+                        os.remove(staged_path)
+                except Exception:
+                    pass
+                return {
+                    "status": "error",
+                    "error": "Pre-scan containment failed after staging fallback"
+                }
+
+        os.chmod(staged_path, 0o400)
+        _write_stage_metadata(staged_path, real_source)
+
+        log_debug(f"DOWNLOAD STAGED: {filepath} -> {staged_path}")
+        return {
+            "status": "ok",
+            "target": staged_path,
+            "original_path": filepath,
+            "staged": True,
+            "source_contained": source_contained
+        }
+    except Exception as e:
+        log_debug(f"Download staging failed for {filepath}: {e}")
+        return {"status": "error", "error": str(e)}
+
+def _sanitize_pdf_in_place(filepath):
+    """Best-effort PDF neutralization: flatten when possible, then strip active actions/scripts."""
+    with open(filepath, "rb") as f:
+        raw = f.read()
+
+    fillable_markers = [
+        rb"/AcroForm\b",
+        rb"/Subtype\s*/Widget\b",
+        rb"/FT\s*/(?:Tx|Btn|Ch|Sig)\b",
+        rb"/XFA\b"
+    ]
+    is_fillable = any(re.search(p, raw) for p in fillable_markers)
+
+    flattened = False
+    gs_bin = _resolve_bin("gs", "/usr/bin/gs")
+    if gs_bin:
+        tmp_fd, tmp_flat = tempfile.mkstemp(prefix="clamfox_pdf_flat_", suffix=".pdf")
+        os.close(tmp_fd)
+        try:
+            cmd = [
+                gs_bin,
+                "-q",
+                "-dSAFER",
+                "-dBATCH",
+                "-dNOPAUSE",
+                "-sDEVICE=pdfwrite",
+                "-dCompatibilityLevel=1.7",
+                "-sstdout=%stderr",
+                f"-sOutputFile={tmp_flat}",
+                "--",
+                filepath
+            ]
+            proc = subprocess.run(cmd, capture_output=True, timeout=45)
+            if proc.returncode == 0 and os.path.exists(tmp_flat) and os.path.getsize(tmp_flat) > 0:
+                shutil.move(tmp_flat, filepath)
+                flattened = True
+                with open(filepath, "rb") as rf:
+                    raw = rf.read()
+        except Exception as e:
+            log_debug(f"PDF flatten fallback (ghostscript) unavailable for {filepath}: {e}")
+        finally:
+            try:
+                if os.path.exists(tmp_flat):
+                    os.remove(tmp_flat)
+            except Exception:
+                pass
+
+    # Neutralize dangerous dictionaries/actions while keeping forms visually intact when possible.
+    replacements = [
+        (rb"/JavaScript\b", rb"/ClamFoxRemoved"),
+        (rb"/JS\b", rb"/ClamFoxRemoved"),
+        (rb"/AA\b", rb"/ClamFoxRemoved"),
+        (rb"/OpenAction\b", rb"/ClamFoxRemoved"),
+        (rb"/Launch\b", rb"/ClamFoxRemoved"),
+        (rb"/SubmitForm\b", rb"/ClamFoxRemoved"),
+        (rb"/URI\b", rb"/ClamFoxRemoved"),
+        (rb"/RichMedia\b", rb"/ClamFoxRemoved"),
+        (rb"/EmbeddedFile\b", rb"/ClamFoxRemoved")
+    ]
+
+    sanitized = raw
+    for pattern, repl in replacements:
+        sanitized = re.sub(pattern, repl, sanitized)
+
+    if sanitized != raw:
+        with open(filepath, "wb") as f:
+            f.write(sanitized)
+
+    return {
+        "changed": sanitized != raw,
+        "fillable": is_fillable,
+        "flattened": flattened
+    }
+
+def _sanitize_zip_document_in_place(filepath, ext=""):
+    """Best-effort sanitization for ODF/OOXML files by removing scripts/macros and external hyperlinks."""
+    tmp_fd, tmp_out = tempfile.mkstemp(prefix="clamfox_doc_sanitize_", suffix=".zip")
+    os.close(tmp_fd)
+
+    macro_paths = (
+        "word/vbaProject.bin", "word/vbaData.xml",
+        "xl/vbaProject.bin", "xl/vbaData.xml",
+        "ppt/vbaProject.bin", "ppt/vbaData.xml",
+        "basic/", "Basic/", "Scripts/", "scripts/"
+    )
+
+    changed = False
+    try:
+        with zipfile.ZipFile(filepath, "r") as zin, zipfile.ZipFile(tmp_out, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                name = info.filename
+                lower_name = name.lower()
+
+                if any(lower_name == p.lower() or lower_name.startswith(p.lower()) for p in macro_paths):
+                    changed = True
+                    continue
+
+                data = zin.read(name)
+                if lower_name.endswith((".xml", ".rels", ".rdf")):
+                    try:
+                        text = data.decode("utf-8", errors="ignore")
+                        cleaned = text
+                        cleaned = re.sub(r'(?is)<Relationship\b[^>]*Type="[^"]*/hyperlink"[^>]*/>', '', cleaned)
+                        cleaned = re.sub(r'(?is)\sTargetMode="External"', '', cleaned)
+                        cleaned = re.sub(r'(?is)\s(?:xlink:href|href)="https?://[^"]*"', '', cleaned)
+                        cleaned = re.sub(r'(?is)<office:scripts>.*?</office:scripts>', '', cleaned)
+                        cleaned = re.sub(r'(?is)<script:event-listener\b[^>]*/>', '', cleaned)
+                        if cleaned != text:
+                            changed = True
+                            data = cleaned.encode("utf-8")
+                    except Exception:
+                        pass
+
+                zout.writestr(info, data)
+
+        if changed:
+            shutil.move(tmp_out, filepath)
+        else:
+            os.remove(tmp_out)
+
+        return {"changed": changed}
+    except Exception:
+        try:
+            if os.path.exists(tmp_out):
+                os.remove(tmp_out)
+        except Exception:
+            pass
+        raise
+
+def sanitize_document_before_release(filepath):
+    """Sanitize risky document formats in-place before release from quarantine."""
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext not in _DOC_SANITIZE_EXTENSIONS and ext not in _LEGACY_OFFICE_EXTENSIONS:
+        return {"status": "ok", "changed": False, "type": "none"}
+
+    if ext in _LEGACY_OFFICE_EXTENSIONS:
+        return {
+            "status": "error",
+            "error": f"Legacy Office format requires manual review: {ext}"
+        }
+
+    try:
+        os.chmod(filepath, 0o600)
+    except Exception:
+        pass
+
+    try:
+        if ext == ".pdf":
+            result = _sanitize_pdf_in_place(filepath)
+            return {
+                "status": "ok",
+                "changed": bool(result.get("changed")),
+                "type": "pdf",
+                "fillable": bool(result.get("fillable")),
+                "flattened": bool(result.get("flattened"))
+            }
+
+        result = _sanitize_zip_document_in_place(filepath, ext)
+        return {
+            "status": "ok",
+            "changed": bool(result.get("changed")),
+            "type": "archive-doc"
+        }
+    except Exception as e:
+        log_debug(f"Document sanitization failed for {filepath}: {e}")
+        return {"status": "error", "error": str(e)}
+
 def lock_file(filepath):
-    """EDR HARDENING: Set read-only permissions during scan to prevent writes/exec while still allowing engine reads."""
+    """EDR HARDENING: Fail-closed lock (000) to block user-space reads/exec until explicit release."""
     try:
         if not os.path.exists(filepath): return False
-        os.chmod(filepath, 0o400)
-        log_debug(f"FILE LOCKED: {filepath} (400 permissions)")
+        os.chmod(filepath, 0o000)
+        log_debug(f"FILE LOCKED: {filepath} (000 permissions)")
         return True
     except Exception as e:
         log_debug(f"Lock failed: {e}")
@@ -1332,14 +1765,14 @@ def get_file_hash(filepath):
 
 def verify_binary_integrity(binary_path, stored_binary_hash=None):
     """Ensure the scanner is a real binary and matches the sealed version."""
-    global _BINARY_INTEGRITY_CACHE
+    global _binary_integrity_cache
     if not binary_path: return False
     
     # 0. Performance Cache Check
     now = time.time()
-    if (_BINARY_INTEGRITY_CACHE["path"] == binary_path and 
-        _BINARY_INTEGRITY_CACHE["hash"] == stored_binary_hash and
-        (now - _BINARY_INTEGRITY_CACHE["timestamp"]) < _BINARY_CACHE_TTL):
+    if (_binary_integrity_cache["path"] == binary_path and 
+        _binary_integrity_cache["hash"] == stored_binary_hash and
+        (now - _binary_integrity_cache["timestamp"]) < _BINARY_CACHE_TTL):
         return True
 
     try:
@@ -1365,7 +1798,7 @@ def verify_binary_integrity(binary_path, stored_binary_hash=None):
                 return False
         
         # Update Cache
-        _BINARY_INTEGRITY_CACHE = {
+        _binary_integrity_cache = {
             "path": binary_path,
             "hash": stored_binary_hash,
             "timestamp": now
@@ -1391,8 +1824,11 @@ def check_malwarebazaar(filepath):
         # Step 1: Get SHA256 hash
         sha256_hash = hashlib.sha256()
         with open(filepath, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
+            while True:
+                chunk = f.read(4096)
+                if not chunk:
+                    break
+                sha256_hash.update(chunk)
         file_hash = sha256_hash.hexdigest()
 
         # Step 2: Check MalwareBazaar (abuse.ch) using secure_fetch for privacy
@@ -1520,7 +1956,7 @@ def update_intelligence(force=False):
     ]
     
     for src in sources:
-        base_path = src["path"]
+        base_path = str(src["path"])
         tmp_path = base_path + ".tmp"
         
         # Polite Limits: 1-hour background, 5-minute hard throttle
@@ -1539,7 +1975,8 @@ def update_intelligence(force=False):
             
             if success and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000:
                 # 🛡️ INTEGRITY: Verify out-of-band signature/hash if available
-                if not verify_feed_integrity(tmp_path, src["checksum_url"], src["checksum_algo"]):
+                checksum_algo = str(src.get("checksum_algo") or "sha256")
+                if not verify_feed_integrity(tmp_path, src["checksum_url"], checksum_algo):
                      if src["checksum_url"]:
                          log_debug(f"🚨 INTEGRITY ERROR: {src['name']} failed verification. Aborting update.")
                          if os.path.exists(tmp_path): os.remove(tmp_path)
@@ -1682,7 +2119,9 @@ def submit_community_burn(target, threat_type, details):
             return True
             
         data.append(entry)
-        with open(burn_ledger, "w") as f:
+        # Enforce 0o600 to avoid exposing IOC ledger to other users on shared systems.
+        fd = os.open(burn_ledger, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(data[-100:], f, indent=4) # Keep last 100 burns
             
         # Write to system-wide audit log — encrypted like all other entries
@@ -1848,9 +2287,12 @@ def check_high_threat_container(filepath, deep_scan=False):
                                 log_debug(f"Tar Slip Blocked in TAR: {member.name}")
                                 return True, _("Archive Escape Attempted: Malicious path detected")
                             
-                            # Extract member
-                            tf.extract(member, path=tmp_dir)
-                            
+                            # Extract member (filter='data' strips dangerous attrs on Py3.12+)
+                            _tf_kwargs = {"path": tmp_dir}
+                            if sys.version_info >= (3, 12):
+                                _tf_kwargs["filter"] = "data"
+                            tf.extract(member, **_tf_kwargs)
+
                             # Reset permissions to remove execute bits
                             if os.path.exists(member_path):
                                 os.chmod(member_path, 0o644)
@@ -1899,10 +2341,12 @@ def check_high_threat_container(filepath, deep_scan=False):
         log_debug(f"Container Analysis Error: {e}")
     return False, None
 
-def scan_file_basic(filepath):
+def scan_file_basic(filepath: str) -> Dict[str, Any]:
     """Minimal, process-safe version of scan_file for parallel scaling."""
     try:
         installed, path, is_daemon = check_clamav(verify=True)
+        if not installed or not path:
+            return {"status": "error", "target": filepath}
         cmd = [path, '--no-summary']
         if is_daemon: cmd.extend(['--fdpass'])
         cmd.extend(['--', filepath])
@@ -1915,7 +2359,7 @@ def scan_file_basic(filepath):
     except (subprocess.TimeoutExpired, OSError, subprocess.SubprocessError):
         return {"status": "error", "target": filepath}
 
-def check_lnk_threat(filepath):
+def check_lnk_threat(filepath: str) -> Tuple[bool, Optional[str]]:
     """Basic forensic check for LNK files pointing to system shells (LOLBins)."""
     if not filepath.lower().endswith(".lnk"):
         return False, None
@@ -2003,6 +2447,9 @@ def verify_timelock(file_path):
             from cryptography.hazmat.primitives import hashes, serialization
             
             pub_key = serialization.load_pem_public_key(_RELEASE_ROOT_PUB_KEY.encode('utf-8'))
+            if not isinstance(pub_key, ec.EllipticCurvePublicKey):
+                log_debug("TIME-LOCK ERROR: Unexpected public key type")
+                return False
             
             try:
                 signature = bytes.fromhex(signature_hex)
@@ -2148,6 +2595,9 @@ def check_phishing_db(url):
         
         if not load_phish_cache(): return False
         
+        if _phish_cache is None:
+            return False
+
         if domain in _phish_cache:
             return True
         
@@ -2596,8 +3046,6 @@ def check_url_reputation(url):
         except Exception:
             return False
 
-    url_orig = url
-    
     # 1. Deep Unmasking: Follow entire redirect chain
     chain = follow_redirects(url)
     
@@ -2711,7 +3159,7 @@ def check_url_reputation(url):
 
 def scan_file(filepath, use_mb=False, pua_enabled=True):
     installed, path, is_daemon = check_clamav(verify=True)
-    if not installed:
+    if not installed or not path:
         return {"status": "error", "error": _("ClamAV not installed")}
     
     # Path Traversal & Existence check (HARDENED)
@@ -2731,6 +3179,10 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
         log_debug(f"SCAN_FILE ERROR: File not found or inaccessible at {filepath}")
         return {"status": "error", "error": _("File not found or inaccessible")}
     
+    if os.path.isdir(actual_path):
+        log_debug(f"SCAN_FILE ERROR: Directory targets are not allowed: {actual_path}")
+        return {"status": "error", "error": _("Directory scan not allowed; only downloaded files are scanned")}
+
     # EDR SECURE SCAN: Temporarily grant read access to the host engine
     fd = None
     original_mode = None
@@ -2750,6 +3202,10 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
             log_debug(f"SCAN_FILE FALLBACK FAILED for {filepath}: {fallback_err}")
         return None
     try:
+        # Construction logic for the command
+        # if path ends in clamdscan, it uses the daemon
+        is_daemon = "clamdscan" in path
+
         # If the file was proactively sealed to 000 by the lock action, opening
         # it will fail before we can adjust mode via FD. Recover read access
         # only for this scan session, then restore in finally.
@@ -2766,11 +3222,7 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
         fd = os.open(actual_path, os.O_RDONLY | os.O_NOFOLLOW)
         original_mode = os.fstat(fd).st_mode & 0o777
         os.fchmod(fd, 0o400) # Allow reading for scan
-        
-        # Construction logic for the command
-        # if path ends in clamdscan, it uses the daemon
-        is_daemon = "clamdscan" in path
-        
+
         # 1. MIME Verification Check (Advanced Scanning)
         ext_ok, detected_type = verify_extension_with_mime(actual_path)
         if not ext_ok:
@@ -2921,7 +3373,11 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
                 if mb_result.get("status") == "mb_infected":
                     # MB caught it!
                     result["status"] = "infected"
-                    result["virus"] = mb_result["data"].get("signature", _("MalwareBazaar Known Threat"))
+                    mb_data = mb_result.get("data")
+                    if isinstance(mb_data, dict):
+                        result["virus"] = mb_data.get("signature", _("MalwareBazaar Known Threat"))
+                    else:
+                        result["virus"] = _("MalwareBazaar Known Threat")
                     quarantined = quarantine_file(actual_path)
                     result["quarantined"] = quarantined
                     
@@ -2975,7 +3431,7 @@ def scan_file(filepath, use_mb=False, pua_enabled=True):
 
 def scan_url(url, use_mb=False, pua_enabled=True, ram_mode=False):
     send_message({"status": "progress", "percent": 10, "msg": _("Preparing scan...")})
-    installed, path, is_daemon = check_clamav(verify=True)
+    installed, _clamav_path, _is_daemon = check_clamav(verify=True)
     if not installed:
         return {"status": "error", "error": _("ClamAV not found")}
         
@@ -3023,13 +3479,13 @@ def handle_message(message, config):
         # 🔐 CRITICAL: Validate message structure
         if not isinstance(message, dict):
             log_debug("handle_message: Message is not a dictionary")
-            send_message({"status": "error", "error": "Invalid message format"})
+            send_message({"status": "error", "error": "Invalid message format", "error_code": "CFX-E-REQ-001"})
             return
         
         # Define allowed actions
         ALLOWED_ACTIONS = {
             "ping", "get_public_key", "check", "scan", "check_url", "lock", "unlock",
-            "release_quarantine", "update_urldb", "force_db_update", "update_yara",
+            "release_quarantine", "stage_quarantine", "update_urldb", "force_db_update", "update_yara",
             "reseal", "get_audit_logs", "list_quarantine", "get_intel", "log_incident", "restore",
             "rotate_secret", "report_threat"
         }
@@ -3038,12 +3494,12 @@ def handle_message(message, config):
         action = message.get("action")
         if not isinstance(action, str):
             log_debug(f"handle_message: Action is not a string (got {type(action).__name__})")
-            send_message({"status": "error", "error": "Invalid action type"})
+            send_message({"status": "error", "error": "Invalid action type", "error_code": "CFX-E-REQ-002"})
             return
         
         if action not in ALLOWED_ACTIONS:
             log_debug(f"handle_message: Unknown action: {action}")
-            send_message({"status": "error", "error": f"Unknown action: {action}"})
+            send_message({"status": "error", "error": f"Unknown action: {action}", "error_code": "CFX-E-REQ-003"})
             return
         
         # Extract and validate target (if provided)
@@ -3054,10 +3510,10 @@ def handle_message(message, config):
             return
         
         # Extract and validate type
-        type = message.get("type", "file")
-        if not isinstance(type, str) or type not in {"file", "url"}:
-            log_debug(f"handle_message: Invalid type: {type}")
-            send_message({"status": "error", "error": f"Invalid message type: {type}"})
+        target_type = message.get("type", "file")
+        if not isinstance(target_type, str) or target_type not in {"file", "url"}:
+            log_debug(f"handle_message: Invalid type: {target_type}")
+            send_message({"status": "error", "error": f"Invalid message type: {target_type}"})
             return
         
         # Extract and validate boolean flags
@@ -3082,7 +3538,7 @@ def handle_message(message, config):
         received_secret = message.get("secret")
         if received_secret is not None and not isinstance(received_secret, str):
             log_debug(f"handle_message: Secret is not a string")
-            send_message({"status": "error", "error": "Invalid secret type"})
+            send_message({"status": "error", "error": "Invalid secret type", "error_code": "CFX-E-REQ-004"})
             return
         
         config_path = os.path.join(os.path.dirname(__file__), "config.json")
@@ -3096,7 +3552,7 @@ def handle_message(message, config):
             _scan_timestamps = [t for t in _scan_timestamps if now - t < 60]
             if len(_scan_timestamps) >= _CIRCUIT_BREAKER_THROTTLE:
                 log_debug("CIRCUIT BREAKER: Rate limit reached. Rejecting request.")
-                send_message({"status": "error", "error": _("Rate limit exceeded (Circuit Breaker active)")})
+                send_message({"status": "error", "error": _("Rate limit exceeded (Circuit Breaker active)"), "error_code": "CFX-E-RATE-001"})
                 return
             if action in expensive_actions:
                 _scan_timestamps.append(now)
@@ -3125,7 +3581,7 @@ def handle_message(message, config):
                     except OSError:
                         pass
                 
-                send_message({"status": "error", "error": _("Unauthorized: Security Handshake Failed"), "tamper": True, "reason": reason})
+                send_message({"status": "error", "error": _("Unauthorized: Security Handshake Failed"), "tamper": True, "reason": reason, "error_code": "CFX-E-AUTH-001"})
                 return
 
         if action == "ping":
@@ -3188,6 +3644,15 @@ def handle_message(message, config):
                 return
             success = lock_file(target)
             send_message({"status": "ok" if success else "error", "target": target})
+        elif action == "stage_quarantine":
+            if not is_safe_path(target):
+                # Staging is a containment action: allow a constrained
+                # fallback for user-owned files in common user locations.
+                if not is_safe_staging_source(target):
+                    send_message({"status": "error", "error": _("Staging Denied: Safe zone violation")})
+                    return
+            stage_result = stage_download_for_quarantine(target)
+            send_message(stage_result)
         elif action == "unlock":
             if not is_safe_path(target):
                 send_message({"status": "error", "error": _("Unlock Denied: Safe zone violation")})
@@ -3204,23 +3669,45 @@ def handle_message(message, config):
             if target and os.path.exists(target):
                 unlock_file(target)
                 if ".clamfox_quarantine" in target:
-                    # Strip the quarantine folder to move it up one level (e.g. into actual Downloads)
-                    safe_target = target.replace(os.path.sep + ".clamfox_quarantine", "")
+                    sanitize_result = sanitize_document_before_release(target)
+                    if sanitize_result.get("status") != "ok":
+                        send_message({
+                            "status": "error",
+                            "error": sanitize_result.get("error") or "Document sanitization failed"
+                        })
+                        return
+
+                    # Recover original destination from stage metadata if present.
+                    meta = _read_stage_metadata(target) or {}
+                    original_target = meta.get("original_path") if meta else None
+
+                    safe_target = original_target if original_target else target.replace(os.path.sep + ".clamfox_quarantine", "")
+                    if not safe_target or not is_safe_path(safe_target):
+                        safe_target = os.path.join(os.path.expanduser("~/Downloads"), os.path.basename(target).split("_", 3)[-1])
+
                     try:
                         import shutil
+                        os.makedirs(os.path.dirname(safe_target), mode=0o700, exist_ok=True)
                         shutil.move(target, safe_target)
-                        send_message({"status": "ok", "target": safe_target})
+                        _delete_stage_metadata(target)
+                        send_message({
+                            "status": "ok",
+                            "target": safe_target
+                        })
                     except Exception as e:
                         send_message({"status": "error", "error": str(e)})
                 else:
-                    send_message({"status": "ok", "target": target})
+                    send_message({
+                        "status": "ok",
+                        "target": target
+                    })
             else:
                 send_message({"status": "ok", "target": target})
         elif action == "scan":
-            if type != "url" and not is_safe_path(target):
+            if target_type != "url" and not is_safe_path(target):
                 send_message({"status": "error", "error": _("Scan Denied: Safe zone violation")})
                 return
-            if type == "url":
+            if target_type == "url":
                 result = scan_url(target, use_mb=use_mb, pua_enabled=pua_enabled, ram_mode=ram_mode)
             else:
                 result = scan_file(target, use_mb=use_mb, pua_enabled=pua_enabled)
@@ -3298,6 +3785,9 @@ def handle_message(message, config):
                 set_task_status("update_yara", "error", str(e))
                 send_message({"status": "error", "error": _("Bridge Error: {err}").format(err=str(e))})
         elif action == "reseal":
+            if not current_hash:
+                send_message({"status": "error", "error": "Unable to reseal: current hash unavailable"})
+                return
             config["integrity_hash"] = current_hash
             try:
                 # 1. Update the Keyring for the current user
@@ -3343,6 +3833,10 @@ def handle_message(message, config):
                     return
                 files = []
                 for f in os.listdir(_QUARANTINE_DIR):
+                    # Exclude .meta.json sidecar files (internal staging artefacts;
+                    # exposing them in the listing confuses popup restore UI).
+                    if f.endswith(".meta.json"):
+                        continue
                     fpath = os.path.join(_QUARANTINE_DIR, f)
                     files.append({
                         "name": f,
@@ -3370,42 +3864,44 @@ def handle_message(message, config):
                 send_message({"status": "error", "error": str(e)})
         elif action == "check":
             try:
-                global _secret_issued
                 log_debug("CHECK ACTION STARTED")
                 installed, path, is_daemon = check_clamav(verify=True)
                 run_dir = get_run_dir()
                 url_db_path = os.path.join(run_dir, "urldb.txt")
-                if not secret:
-                    secret = secrets.token_urlsafe(32)
-                    config["secret"] = secret
-                    save_config(config)
-                    log_debug("Generated fallback handshake secret (keyring unavailable or empty).")
-                if not os.path.exists(url_db_path):
-                    log_debug("Check: Intelligence DB missing, triggering background update.")
-                    threading.Thread(target=update_intelligence, kwargs={"force": True}, daemon=True).start()
-                
-                binary_hash = config.get("binary_hash")
-                binary_ok = verify_binary_integrity(path, binary_hash) if installed else False
-                
-                # Initial Seal: Store script and binary hashes if not already present
-                config_updated = False
-                if not stored_hash and current_hash:
-                    config["integrity_hash"] = current_hash
-                    config_updated = True
-                
-                if installed and not binary_hash:
-                    config["binary_hash"] = get_file_hash(path)
-                    config_updated = True
+                # Protect all config dict mutations under _config_lock (RLock) to prevent
+                # TOCTOU races when concurrent requests read secret/integrity_hash.
+                with _config_lock:
+                    if not secret:
+                        secret = secrets.token_urlsafe(32)
+                        config["secret"] = secret
+                        save_config(config)
+                        log_debug("Generated fallback handshake secret (keyring unavailable or empty).")
+                    if not os.path.exists(url_db_path):
+                        log_debug("Check: Intelligence DB missing, triggering background update.")
+                        threading.Thread(target=update_intelligence, kwargs={"force": True}, daemon=True).start()
 
-                # 3. Dynamic Honeypot Secret (Rolling/Session based)
-                hp_secret = config.get("honeypot_secret")
-                if not hp_secret:
-                    hp_secret = "cf_honey_" + secrets.token_urlsafe(16)
-                    config["honeypot_secret"] = hp_secret
-                    config_updated = True
+                    binary_hash = config.get("binary_hash")
+                    binary_ok = verify_binary_integrity(path, binary_hash) if installed else False
 
-                if config_updated:
-                    save_config(config)
+                    # Initial Seal: Store script and binary hashes if not already present
+                    config_updated = False
+                    if not stored_hash and current_hash:
+                        config["integrity_hash"] = current_hash
+                        config_updated = True
+
+                    if installed and not binary_hash:
+                        config["binary_hash"] = get_file_hash(path)
+                        config_updated = True
+
+                    # Dynamic Honeypot Secret (Rolling/Session based)
+                    hp_secret = config.get("honeypot_secret")
+                    if not hp_secret:
+                        hp_secret = "cf_honey_" + secrets.token_urlsafe(16)
+                        config["honeypot_secret"] = hp_secret
+                        config_updated = True
+
+                    if config_updated:
+                        save_config(config)
                 
                 dist_info = detect_dist_info()
                 log_debug("Check: Privacy Check starting...")
@@ -3424,8 +3920,9 @@ def handle_message(message, config):
                 version_info = "Unknown"
                 if installed:
                     try:
-                        v_res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=2)
-                        version_info = v_res.stdout.strip()
+                        if path:
+                            v_res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=2)
+                            version_info = v_res.stdout.strip()
                     except Exception: pass
 
                 # SECURITY: Re-issue secret when caller does not present the current one.
@@ -3434,8 +3931,6 @@ def handle_message(message, config):
                 # caller already proves possession of the active secret.
                 with _secret_issued_lock:
                     should_emit_secret = (not received_secret or received_secret != secret)
-                    if should_emit_secret:
-                        _secret_issued = True
 
                 status_msg = {
                     "status": "ok" if installed else "missing",
@@ -3464,7 +3959,6 @@ def handle_message(message, config):
                 }
                 log_debug("CHECK ACTION COMPLETED")
                 send_message(status_msg)
-                # _secret_issued flag was already set atomically above under the lock
             except Exception as e:
                 log_debug(f"Internal Check error: {e}")
                 send_message({"status": "error", "error": f"Check logic failed: {e}"})
@@ -3498,6 +3992,8 @@ def handle_message(message, config):
         elif action == "report_threat":
             target = message.get("target")
             threat_type = message.get("type", "unknown")
+            if not isinstance(threat_type, str):
+                threat_type = "unknown"
             details = message.get("details", {})
             
             if not target:
@@ -3524,7 +4020,8 @@ def graceful_shutdown(signum, frame):
     log_debug(f"Graceful shutdown triggered by signal {signum}")
     # Shut down pools to ensure tasks complete or clean up resources
     _thread_pool.shutdown(wait=False)
-    _process_pool.shutdown(wait=False)
+    if _process_pool is not None:
+        _process_pool.shutdown(wait=False)
     sys.exit(0)
 
 def cleanup_stale_quarantine():
@@ -3586,6 +4083,13 @@ def main():
     signal.signal(signal.SIGTERM, graceful_shutdown)
 
     config = load_config()
+
+    # Strict signing mode: bridge must have a stable machine key before serving
+    # any native-messaging requests. Failing fast here avoids intermittent
+    # fail-silent timeouts later in send_message().
+    if not get_or_create_machine_key():
+        log_debug("CRITICAL: Machine signing key unavailable in strict mode. Refusing to start bridge.")
+        sys.exit(1)
     
     # Start Offensive Shield Threads (background)
     start_clipper_shield()
@@ -3638,7 +4142,8 @@ def main():
     
     # Cleanup on exit
     _thread_pool.shutdown(wait=True)
-    _process_pool.shutdown(wait=True)
+    if _process_pool is not None:
+        _process_pool.shutdown(wait=True)
 
 if __name__ == '__main__':
     main()

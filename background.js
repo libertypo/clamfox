@@ -27,6 +27,27 @@ const ACTIVE_CHALLENGES = new Map(); // tabId -> expiration timestamp
 const USER_WHITELIST = new Set(); // Persistent overrides
 const USER_WHITELIST_EXPIRY = new Map(); // domain -> expiry epoch ms
 const USER_BYPASS_TTL_MS = 24 * 60 * 60 * 1000; // 24h default manual bypass TTL
+const LEGACY_OFFICE_DOWNLOAD_EXTENSIONS = new Set([
+    ".doc", ".dot",
+    ".xls", ".xlt",
+    ".ppt", ".pot", ".pps",
+    ".rtf"
+]);
+
+function getLowercaseExtension(filePath) {
+    if (!filePath || typeof filePath !== "string") return "";
+    try {
+        const u = new URL(filePath);
+        if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "ftp:") {
+            filePath = u.pathname;
+        }
+    } catch (e) { /* plain path, not a full URL */ }
+    const lastDot = filePath.lastIndexOf(".");
+    if (lastDot === -1) return "";
+    const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+    if (lastDot < lastSlash) return "";
+    return filePath.slice(lastDot).toLowerCase();
+}
 
 // WASM Shield State
 let WASM_READY = false;
@@ -342,7 +363,7 @@ browser.alarms.onAlarm.addListener((alarm) => {
 browser.alarms.create("garbage_collection", { periodInMinutes: 15 });
 
 browser.downloads.onChanged.addListener(async (delta) => {
-    // Scan after download completes: lock access, evaluate, then release/quarantine.
+    // Scan after download completes: stage in quarantine, evaluate, then release/quarantine.
     if (delta.state && delta.state.current === "complete") {
         dbg("Download complete event received for ID:", delta.id);
         const items = await browser.downloads.search({ id: delta.id });
@@ -352,35 +373,29 @@ browser.downloads.onChanged.addListener(async (delta) => {
         }
 
         if (item && item.filename) {
-            browser.notifications.create(`scan-${delta.id}`, {
-                type: "basic",
-                iconUrl: "icons/scanning.svg",
-                title: "ClamFox Analysis",
-                message: `Scanning downloaded file: ${item.filename.split('/').pop() || item.filename}...`
-            }).catch(() => { });
+            const fileExt = getLowercaseExtension(item.filename);
+            if (LEGACY_OFFICE_DOWNLOAD_EXTENSIONS.has(fileExt)) {
+                const fileName = item.filename.split('/').pop() || item.filename;
+                const blockReason = `Legacy Office format blocked by policy (${fileExt})`;
 
-            // SECURITY HARDENING: Lock the file from the OS BEFORE the scan reaches the user
-            let lockedBeforeScan = false;
-            try {
-                const secret = await getSecret();
-                if (!secret || !HOST_AVAILABLE) {
-                    throw new Error("Security engine unavailable before file lock");
+                try {
+                    await logBlock(
+                        fileName,
+                        blockReason,
+                        item.finalUrl || item.url || item.filename,
+                        null,
+                        {
+                            block_stage: "download",
+                            source_host: null,
+                            final_host: null,
+                            engine_verdict: blockReason,
+                            verdict_status: "blocked_legacy_office"
+                        }
+                    );
+                } catch (e) {
+                    console.warn("Legacy Office block incident log failed:", e);
                 }
 
-                const lockResponse = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
-                    action: "lock",
-                    target: item.filename,
-                    secret: secret
-                }, 5000);
-
-                if (!lockResponse || lockResponse.status !== "ok") {
-                    throw new Error(lockResponse && lockResponse.error ? lockResponse.error : "File lock request failed");
-                }
-
-                lockedBeforeScan = true;
-                dbg("🔒 FILE SEALED: Access restricted during analysis.");
-            } catch (e) {
-                console.error("🛑 DOWNLOAD SECURITY FAILURE: Could not lock file before scan", e);
                 try {
                     await browser.downloads.cancel(delta.id);
                 } catch (err) { }
@@ -395,14 +410,76 @@ browser.downloads.onChanged.addListener(async (delta) => {
                     type: "basic",
                     iconUrl: "icons/warning.svg",
                     title: "🛑 DOWNLOAD BLOCKED",
-                    message: "ClamFox blocked this file because secure pre-scan locking failed.",
+                    message: `Legacy Office files (${fileExt}) are blocked for security. Use modern formats like .docx/.xlsx/.pptx.`,
                     priority: 2
                 }).catch(() => { });
                 return;
             }
 
-            // Ensure our engine knows it's a quarantined target if routing was successful
-            performScan(item.filename, "file", item.id, null, lockedBeforeScan);
+            browser.notifications.create(`scan-${delta.id}`, {
+                type: "basic",
+                iconUrl: "icons/scanning.svg",
+                title: "ClamFox Analysis",
+                message: `Scanning downloaded file: ${item.filename.split('/').pop() || item.filename}...`
+            }).catch(() => { });
+
+            // SECURITY HARDENING: Stage any downloaded file inside quarantine BEFORE scan.
+            let stagedBeforeScan = false;
+            let scanTarget = item.filename;
+            try {
+                const secret = await getSecret();
+                if (!secret || !HOST_AVAILABLE) {
+                    throw new Error("Security engine unavailable before quarantine stage");
+                }
+
+                const stageResponse = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
+                    action: "stage_quarantine",
+                    target: item.filename,
+                    secret: secret
+                }, 7000);
+
+                if (!stageResponse || stageResponse.status !== "ok" || !stageResponse.target) {
+                    throw new Error(stageResponse && stageResponse.error ? stageResponse.error : "Pre-scan quarantine stage failed");
+                }
+
+                stagedBeforeScan = true;
+                scanTarget = stageResponse.target;
+                dbg("🔒 FILE STAGED: Download routed to quarantine for pre-release analysis.");
+            } catch (e) {
+                console.error("🛑 DOWNLOAD SECURITY FAILURE: Could not stage file before scan", e);
+                const stageErr = e && e.message ? String(e.message) : "unknown staging error";
+                const folderWarning = browser.i18n.getMessage("downloadsFolderOnlyWarning") || "Downloads are only allowed in the Downloads folder.";
+                const warningMessage = `${folderWarning} Secure pre-scan quarantine staging failed (${stageErr.slice(0, 120)}).`;
+
+                try {
+                    await browser.downloads.cancel(delta.id);
+                } catch (err) { }
+                try {
+                    await browser.downloads.removeFile(delta.id);
+                } catch (err) { }
+                try {
+                    await browser.downloads.erase({ id: delta.id });
+                } catch (err) { }
+
+                browser.action.setBadgeText({ text: "BLK" }).catch(() => { });
+                browser.action.setBadgeBackgroundColor({ color: "#ef4444" }).catch(() => { });
+
+                browser.notifications.create(`download-block-${delta.id || Date.now()}`, {
+                    type: "basic",
+                    iconUrl: "icons/warning.svg",
+                    title: "🛑 DOWNLOAD BLOCKED",
+                    message: warningMessage,
+                    priority: 2
+                }).catch(() => { });
+
+                // Secondary channel: if browser/system suppresses the explicit block toast,
+                // keep the warning visible through the generic error notifier too.
+                notifyError(warningMessage);
+                return;
+            }
+
+            // Target is now a quarantine-staged file; it will only be released if scan/sanitization passes.
+            performScan(scanTarget, "file", item.id, null, stagedBeforeScan);
         } else {
             console.warn("Download completion detected but no filename available for scan:", delta.id);
         }
@@ -899,6 +976,22 @@ function validateNativeResponse(action, response) {
         case "list_quarantine":
             if (response.files !== undefined && !Array.isArray(response.files)) {
                 throw new Error("Quarantine listing payload must be an array");
+            }
+            if (Array.isArray(response.files)) {
+                for (const entry of response.files) {
+                    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+                        throw new Error("Quarantine entry must be an object");
+                    }
+                    if (typeof entry.name !== "string" || entry.name.length === 0 || entry.name.length > 512) {
+                        throw new Error("Quarantine entry has invalid name field");
+                    }
+                    if (typeof entry.size !== "number" || !Number.isFinite(entry.size) || entry.size < 0) {
+                        throw new Error("Quarantine entry has invalid size field");
+                    }
+                    if (typeof entry.created !== "number" || !Number.isFinite(entry.created) || entry.created < 0) {
+                        throw new Error("Quarantine entry has invalid created field");
+                    }
+                }
             }
             break;
         case "clipper_alert":
@@ -1797,6 +1890,7 @@ async function performScan(target, type, downloadId = null, tabId = null, locked
                     browser.notifications.clear(`scan-${downloadId}`).catch(() => { });
                 }
                 const virus = response.virus || (response.mb && response.mb.status === "mb_infected" ? "MalwareBazaar Flag" : "Unknown Threat");
+                const hostQuarantined = response.quarantined === true;
                 await logBlock(
                     target.split('/').pop() || target,
                     virus,
@@ -1814,13 +1908,35 @@ async function performScan(target, type, downloadId = null, tabId = null, locked
                 browser.action.setBadgeText({ text: "ERR" });
                 browser.action.setBadgeBackgroundColor({ color: "#ef4444" });
 
+                let downloadRemoved = false;
                 if (downloadId) {
                     try {
                         await browser.downloads.cancel(downloadId);
                         await browser.downloads.removeFile(downloadId).catch(() => { });
                         await browser.downloads.erase({ id: downloadId });
+                        downloadRemoved = true;
                     } catch (e) { }
                 }
+
+                // If host-side quarantine failed (or not confirmed), enforce a lock
+                // on the scanned path so malware cannot be opened/executed.
+                if (type === "file" && !hostQuarantined) {
+                    try {
+                        await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
+                            action: "lock",
+                            target,
+                            secret
+                        }, 5000);
+                        console.warn("⚠️ INFECTED FALLBACK: quarantine not confirmed; file locked.");
+                    } catch (lockErr) {
+                        console.error("🛑 INFECTED FALLBACK FAILURE: unable to lock file after quarantine failure", lockErr);
+                    }
+
+                    if (!downloadRemoved) {
+                        notifyError("Malware detected. Quarantine was not confirmed; file was locked for containment.");
+                    }
+                }
+
                 lockActive = false;
                 notifyThreat(target, response.virus || "MalwareBazaar threat");
 
@@ -1852,25 +1968,27 @@ async function performScan(target, type, downloadId = null, tabId = null, locked
                 browser.action.setBadgeBackgroundColor({ color: "#10b981" });
                 notifyClean(target, downloadId);
 
-                // SECURITY HARDENING: Release it from the quarantine directory into the user's view
-                try {
-                    const secret = await getSecret();
-                    if (!secret || !HOST_AVAILABLE) {
-                        throw new Error("Security engine unavailable during clean release");
+                // Only staged files need explicit release from quarantine.
+                if (lockActive) {
+                    try {
+                        const secret = await getSecret();
+                        if (!secret || !HOST_AVAILABLE) {
+                            throw new Error("Security engine unavailable during clean release");
+                        }
+                        const releaseResp = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
+                            action: "release_quarantine",
+                            target: target,
+                            secret: secret
+                        }, 5000);
+                        if (releaseResp && releaseResp.status === "ok") {
+                            lockActive = false;
+                        } else {
+                            throw new Error((releaseResp && releaseResp.error) ? releaseResp.error : "release_quarantine returned non-ok status");
+                        }
+                    } catch (e) {
+                        notifyError("Clean verdict received, but file release failed. Attempting lock recovery.");
+                        await recoverLockedFile("clean verdict release failure");
                     }
-                    const releaseResp = await sendNativeMessageWithTimeout(NATIVE_HOST_NAME, {
-                        action: "release_quarantine",
-                        target: target,
-                        secret: secret
-                    }, 5000);
-                    if (releaseResp && releaseResp.status === "ok") {
-                        lockActive = false;
-                    } else {
-                        throw new Error((releaseResp && releaseResp.error) ? releaseResp.error : "release_quarantine returned non-ok status");
-                    }
-                } catch (e) {
-                    notifyError("Clean verdict received, but file release failed. Attempting lock recovery.");
-                    await recoverLockedFile("clean verdict release failure");
                 }
 
                 setTimeout(() => browser.action.setBadgeText({ text: "" }), 5000);
@@ -2280,7 +2398,13 @@ function notifyHostMissing() {
 }
 
 // Context Menu Setup
-browser.runtime.onInstalled.addListener(() => {
+async function registerContextMenus() {
+    try {
+        await browser.menus.removeAll();
+    } catch (e) {
+        // Non-fatal: menu state can be stale across updates/reloads.
+    }
+
     browser.menus.create({
         id: "scan-link",
         title: browser.i18n.getMessage("scanLink"),
@@ -2293,6 +2417,10 @@ browser.runtime.onInstalled.addListener(() => {
         contexts: ["image"]
     });
     dbg("ClamAV Context Menus Registered");
+}
+
+browser.runtime.onInstalled.addListener(async () => {
+    await registerContextMenus();
 
     // Initialize 6-hour Intelligence Sync Alarm
     setupIntelligenceAlarm();
@@ -2300,6 +2428,13 @@ browser.runtime.onInstalled.addListener(() => {
     // Ensure privacy shield is active on install/update
     initPrivacyShield();
 });
+
+browser.runtime.onStartup.addListener(() => {
+    registerContextMenus().catch(() => { });
+});
+
+// Defensive startup registration for extension reloads where onInstalled is not fired.
+registerContextMenus().catch(() => { });
 
 async function setupIntelligenceAlarm() {
     const settings = await browser.storage.local.get({ autoSyncEnabled: true });
@@ -2476,13 +2611,14 @@ browser.storage.onChanged.addListener((changes, area) => {
 browser.webRequest.onHeadersReceived.addListener(
     (details) => {
         try {
+            const responseHeaders = Array.isArray(details.responseHeaders) ? details.responseHeaders : [];
+
             const url = new URL(details.url);
             // ONLY apply CSP hardening to designated High-Value Portals, NOT to general user whitelists.
             const isTargetPortal = isPortal(url.hostname);
 
-            if (isTargetPortal) {
+            if (details.type === "main_frame" && isTargetPortal) {
                 // Proactive Inspection: If it's a critical auth flow (PosteID, etc) or site has its own strict policy, DON'T interfere.
-                const responseHeaders = details.responseHeaders;
                 const hasExistingSecurity = responseHeaders.some(h =>
                     h.name.toLowerCase() === "content-security-policy" ||
                     h.name.toLowerCase() === "x-frame-options"
@@ -2507,8 +2643,8 @@ browser.webRequest.onHeadersReceived.addListener(
         } catch (e) { }
         return {};
     },
-    { urls: ["http://*/*", "https://*/*"], types: ["main_frame"] },
-    ["responseHeaders"]
+    { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "object"] },
+    ["blocking", "responseHeaders"]
 );
 
 // Start the proactive bridge immediately

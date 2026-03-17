@@ -9,9 +9,29 @@ permissions:
   contents: read
 
 jobs:
-  security-tests:
+  critical-invariants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Run Critical Invariants Gate
+        run: ./scripts/critical_invariants.sh
+
+      - name: Run JS Security Suite
+        run: node test_security_suite.js
+
+  extended-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: critical-invariants
 
     steps:
       - name: Checkout
@@ -22,16 +42,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '20'
-
       - name: Run Python Security Suite
         run: python test_security_suite.py
-
-      - name: Run JS Security Suite
-        run: node test_security_suite.js
 
       - name: Run CVE Catalog Regression Harness
         run: python integration_tests.py

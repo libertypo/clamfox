@@ -287,6 +287,15 @@
     "suppressTrustedToastsHint": {
         "message": "Stop showing notification toasts on official brands and whitelisted domains"
     },
+    "forceDownloadLabel": {
+        "message": "Force Download Before Scan"
+    },
+    "forceDownloadHint": {
+        "message": "Prevent inline opening of PDF/ODF/Office and require secure download flow"
+    },
+    "downloadsFolderOnlyWarning": {
+        "message": "Downloads are only allowed in the Downloads folder."
+    },
     "clearHistory": {
         "message": "Clear"
     },

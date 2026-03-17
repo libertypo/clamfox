@@ -67,3 +67,9 @@ context of execution
    - This gives the Python script access to your local files 
      (required to scan them).
 
+4. DOWNLOAD SAFE-ZONE ENFORCEMENT
+   - For secure pre-scan containment, ClamFox enforces protected download
+     flow in the user's `Downloads` folder.
+   - If a file is saved outside this folder, ClamFox can block the download
+     to avoid safe-zone violations.
+
